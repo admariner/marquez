@@ -12,6 +12,7 @@ import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.UUID;
 import java.util.stream.StreamSupport;
+import javax.annotation.Nullable;
 import lombok.NonNull;
 import marquez.common.Utils;
 import marquez.service.models.LineageEvent;
@@ -126,9 +127,9 @@ public interface DatasetFacetsDao {
   default void insertDatasetFacetsFor(
       @NonNull UUID datasetUuid,
       @NonNull UUID datasetVersionUuid,
-      @NonNull UUID runUuid,
+      @Nullable UUID runUuid,
       @NonNull Instant lineageEventTime,
-      @NonNull String lineageEventType,
+      @Nullable String lineageEventType,
       @NonNull LineageEvent.DatasetFacets datasetFacets) {
     final Instant now = Instant.now();
 
@@ -145,6 +146,58 @@ public interface DatasetFacetsDao {
                     lineageEventTime,
                     lineageEventType,
                     DatasetFacet.typeFromName(fieldName),
+                    fieldName,
+                    FacetUtils.toPgObject(fieldName, jsonNode.get(fieldName))));
+  }
+
+  default void insertInputDatasetFacetsFor(
+      @NonNull UUID datasetUuid,
+      @NonNull UUID datasetVersionUuid,
+      @Nullable UUID runUuid,
+      @NonNull Instant lineageEventTime,
+      @Nullable String lineageEventType,
+      @NonNull LineageEvent.InputDatasetFacets inputFacets) {
+    final Instant now = Instant.now();
+
+    JsonNode jsonNode = Utils.getMapper().valueToTree(inputFacets);
+    StreamSupport.stream(
+            Spliterators.spliteratorUnknownSize(jsonNode.fieldNames(), Spliterator.DISTINCT), false)
+        .forEach(
+            fieldName ->
+                insertDatasetFacet(
+                    now,
+                    datasetUuid,
+                    datasetVersionUuid,
+                    runUuid,
+                    lineageEventTime,
+                    lineageEventType,
+                    Type.INPUT,
+                    fieldName,
+                    FacetUtils.toPgObject(fieldName, jsonNode.get(fieldName))));
+  }
+
+  default void insertOutputDatasetFacetsFor(
+      @NonNull UUID datasetUuid,
+      @NonNull UUID datasetVersionUuid,
+      @Nullable UUID runUuid,
+      @NonNull Instant lineageEventTime,
+      @Nullable String lineageEventType,
+      @NonNull LineageEvent.OutputDatasetFacets outputFacets) {
+    final Instant now = Instant.now();
+
+    JsonNode jsonNode = Utils.getMapper().valueToTree(outputFacets);
+    StreamSupport.stream(
+            Spliterators.spliteratorUnknownSize(jsonNode.fieldNames(), Spliterator.DISTINCT), false)
+        .forEach(
+            fieldName ->
+                insertDatasetFacet(
+                    now,
+                    datasetUuid,
+                    datasetVersionUuid,
+                    runUuid,
+                    lineageEventTime,
+                    lineageEventType,
+                    Type.OUTPUT,
                     fieldName,
                     FacetUtils.toPgObject(fieldName, jsonNode.get(fieldName))));
   }

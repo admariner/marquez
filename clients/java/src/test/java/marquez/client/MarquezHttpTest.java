@@ -85,9 +85,9 @@ public class MarquezHttpTest {
     assertThatNullPointerException().isThrownBy(() -> MarquezHttp.create(null));
     assertThatNullPointerException().isThrownBy(() -> MarquezHttp.create(null, API_KEY));
     assertThatNullPointerException().isThrownBy(() -> MarquezHttp.create(null, null));
-    assertThatNullPointerException().isThrownBy(() -> MarquezHttp.create(null, null, null));
+    assertThatNullPointerException().isThrownBy(() -> MarquezHttp.create(null, null, null, null));
     assertThatNullPointerException()
-        .isThrownBy(() -> MarquezHttp.create(SSLContext.getDefault(), null, API_KEY));
+        .isThrownBy(() -> MarquezHttp.create(SSLContext.getDefault(), null, null, API_KEY));
   }
 
   @Test
@@ -105,7 +105,7 @@ public class MarquezHttpTest {
   public void testClient_properlyFormatsNamespaces() throws Exception {
     final String pathTemplate = "/namespaces/%s";
     final String pathArg = "database://localhost:1234";
-    final String path = "/namespaces/database%3A%2F%2Flocalhost%3A1234";
+    final String path = "/namespaces/database:%2F%2Flocalhost:1234";
 
     URL expected = new URL(BASE_URL + BASE_PATH + path);
     URL actual = marquezUrl.from(path(pathTemplate, pathArg));

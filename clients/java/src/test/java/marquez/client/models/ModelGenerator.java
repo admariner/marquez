@@ -10,6 +10,7 @@ import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Collectors.toSet;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import java.net.URI;
 import java.net.URL;
 import java.time.Instant;
@@ -177,6 +178,7 @@ public final class ModelGenerator {
         .type(newJobType())
         .inputs(newInputs(2))
         .outputs(newOutputs(4))
+        .tags(ImmutableSet.of())
         .location(newLocation())
         .description(newDescription())
         .build();
@@ -208,7 +210,8 @@ public final class ModelGenerator {
         newDescription(),
         latestRun,
         null,
-        currentVersion);
+        currentVersion,
+        null);
   }
 
   public static Job newJobWith(final UUID currentVersion) {
@@ -238,7 +241,20 @@ public final class ModelGenerator {
   public static Run newRun() {
     final Instant now = newTimestamp();
     return new Run(
-        newRunId(), now, now, now, now, RunState.NEW, null, null, null, newRunArgs(), null);
+        newRunId(),
+        now,
+        now,
+        now,
+        now,
+        RunState.NEW,
+        null,
+        null,
+        null,
+        newRunArgs(),
+        null,
+        null,
+        null,
+        null);
   }
 
   public static String newOwnerName() {
@@ -393,5 +409,17 @@ public final class ModelGenerator {
 
   public static Map.Entry<String, String> newFacetSchemaURL() {
     return new AbstractMap.SimpleImmutableEntry<>("_schemaURL", "test_schemaURL" + newId());
+  }
+
+  public static InputDatasetVersion newInputDatasetVersion() {
+    return new InputDatasetVersion(
+        new DatasetVersionId(newNamespaceName(), newDatasetName(), UUID.randomUUID()),
+        ImmutableMap.of("datasetFacet", "{some-facet1}"));
+  }
+
+  public static OutputDatasetVersion newOutputDatasetVersion() {
+    return new OutputDatasetVersion(
+        new DatasetVersionId(newNamespaceName(), newDatasetName(), UUID.randomUUID()),
+        ImmutableMap.of("datasetFacet", "{some-facet1}"));
   }
 }

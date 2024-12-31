@@ -9,6 +9,7 @@ import static marquez.db.LineageTestUtils.PRODUCER_URL;
 import static marquez.db.LineageTestUtils.SCHEMA_URL;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.google.common.collect.ImmutableMap;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
@@ -18,6 +19,8 @@ import marquez.api.JdbiUtils;
 import marquez.db.models.UpdateLineageRow;
 import marquez.jdbi.MarquezJdbiExternalPostgresExtension;
 import marquez.service.models.LineageEvent;
+import marquez.service.models.LineageEvent.Dataset;
+import marquez.service.models.LineageEvent.JobFacet;
 import org.jdbi.v3.core.Jdbi;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -304,10 +307,71 @@ public class DatasetFacetsDaoTest {
     assertThat(facet.facet().toString()).isEqualTo("{\"custom-output\": \"{whatever}\"}");
   }
 
+  @Test
+  public void testInsertOutputDatasetFacetsFor() {
+    LineageEvent.JobFacet jobFacet = JobFacet.builder().build();
+
+    UpdateLineageRow lineageRow =
+        LineageTestUtils.createLineageRow(
+            openLineageDao,
+            "job_" + UUID.randomUUID(),
+            "COMPLETE",
+            jobFacet,
+            Collections.emptyList(),
+            Arrays.asList(
+                new Dataset(
+                    "namespace",
+                    "dataset_output",
+                    null,
+                    null,
+                    LineageEvent.OutputDatasetFacets.builder()
+                        .additional(
+                            ImmutableMap.of(
+                                "outputFacet1", "{some-facet1}",
+                                "outputFacet2", "{some-facet2}"))
+                        .build())),
+            null);
+
+    assertThat(getDatasetFacet(lineageRow, "outputFacet1").facet().toString())
+        .isEqualTo("{\"outputFacet1\": \"{some-facet1}\"}");
+    assertThat(getDatasetFacet(lineageRow, "outputFacet2").facet().toString())
+        .isEqualTo("{\"outputFacet2\": \"{some-facet2}\"}");
+  }
+
+  @Test
+  public void testInsertInputDatasetFacetsFor() {
+    LineageEvent.JobFacet jobFacet = JobFacet.builder().build();
+
+    UpdateLineageRow lineageRow =
+        LineageTestUtils.createLineageRow(
+            openLineageDao,
+            "job_" + UUID.randomUUID(),
+            "COMPLETE",
+            jobFacet,
+            Arrays.asList(
+                new Dataset(
+                    "namespace",
+                    "dataset_output",
+                    null,
+                    LineageEvent.InputDatasetFacets.builder()
+                        .additional(
+                            ImmutableMap.of(
+                                "inputFacet1", "{some-facet1}",
+                                "inputFacet2", "{some-facet2}"))
+                        .build(),
+                    null)),
+            Collections.emptyList(),
+            null);
+
+    assertThat(getDatasetFacet(lineageRow, "inputFacet1").facet().toString())
+        .isEqualTo("{\"inputFacet1\": \"{some-facet1}\"}");
+    assertThat(getDatasetFacet(lineageRow, "inputFacet2").facet().toString())
+        .isEqualTo("{\"inputFacet2\": \"{some-facet2}\"}");
+  }
+
   private UpdateLineageRow createLineageRowWithInputDataset(
       LineageEvent.DatasetFacets.DatasetFacetsBuilder inputDatasetFacetsbuilder) {
-    LineageEvent.JobFacet jobFacet =
-        new LineageEvent.JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    LineageEvent.JobFacet jobFacet = JobFacet.builder().build();
 
     return LineageTestUtils.createLineageRow(
         openLineageDao,
@@ -323,8 +387,7 @@ public class DatasetFacetsDaoTest {
 
   private UpdateLineageRow createLineageRowWithOutputDataset(
       LineageEvent.DatasetFacets.DatasetFacetsBuilder outputDatasetFacetsbuilder) {
-    LineageEvent.JobFacet jobFacet =
-        new LineageEvent.JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    LineageEvent.JobFacet jobFacet = JobFacet.builder().build();
 
     return LineageTestUtils.createLineageRow(
         openLineageDao,

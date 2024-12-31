@@ -133,7 +133,11 @@ public class DatasetResource extends BaseResource {
     final List<DatasetVersion> datasetVersions =
         datasetVersionService.findAllWithRun(
             namespaceName.getValue(), datasetName.getValue(), limit, offset);
-    return Response.ok(new DatasetVersions(datasetVersions)).build();
+
+    final int totalCount =
+        datasetVersionService.countDatasetVersions(
+            namespaceName.getValue(), datasetName.getValue());
+    return Response.ok(new DatasetVersions(datasetVersions, totalCount)).build();
   }
 
   @Timed
@@ -190,11 +194,39 @@ public class DatasetResource extends BaseResource {
     throwIfNotExists(namespaceName);
     throwIfNotExists(namespaceName, datasetName);
 
-    log.info("Successfully tagged dataset '{}' with '{}'.", datasetName.getValue(), tagName);
+    log.info(
+        "Successfully tagged dataset '{}' with '{}'.", datasetName.getValue(), tagName.getValue());
 
     final Dataset dataset =
         datasetService.updateTags(
             namespaceName.getValue(), datasetName.getValue(), tagName.getValue());
+    return Response.ok(dataset).build();
+  }
+
+  @Timed
+  @ResponseMetered
+  @ExceptionMetered
+  @DELETE
+  @Path("/{dataset}/tags/{tag}")
+  @Produces(APPLICATION_JSON)
+  public Response deleteDatasetTag(
+      @PathParam("namespace") NamespaceName namespaceName,
+      @PathParam("dataset") DatasetName datasetName,
+      @PathParam("tag") TagName tagName) {
+    throwIfNotExists(namespaceName);
+    throwIfNotExists(namespaceName, datasetName);
+
+    log.info(
+        "Deleted tag '{}' from dataset '{}' on namespace '{}'",
+        tagName.getValue(),
+        datasetName.getValue(),
+        namespaceName.getValue());
+    datasetService.deleteDatasetTag(
+        namespaceName.getValue(), datasetName.getValue(), tagName.getValue());
+    Dataset dataset =
+        datasetService
+            .findDatasetByName(namespaceName.getValue(), datasetName.getValue())
+            .orElseThrow(() -> new DatasetNotFoundException(datasetName));
     return Response.ok(dataset).build();
   }
 
@@ -214,10 +246,10 @@ public class DatasetResource extends BaseResource {
     throwIfNotExists(namespaceName, datasetName);
     throwIfNotExists(namespaceName, datasetName, fieldName);
     log.info(
-        "Tagging field '{}' for dataset '{}' with '{}'.",
-        fieldName,
+        "Tagging field '{}' on dataset '{}' with '{}'.",
+        fieldName.getValue(),
         datasetName.getValue(),
-        tagName);
+        tagName.getValue());
     final Dataset dataset =
         datasetFieldService.updateTags(
             namespaceName.getValue(),
@@ -227,10 +259,54 @@ public class DatasetResource extends BaseResource {
     return Response.ok(dataset).build();
   }
 
+  @Timed
+  @ResponseMetered
+  @ExceptionMetered
+  @DELETE
+  @Path("/{dataset}/fields/{field}/tags/{tag}")
+  @Produces(APPLICATION_JSON)
+  public Response deleteTagField(
+      @PathParam("namespace") NamespaceName namespaceName,
+      @PathParam("dataset") DatasetName datasetName,
+      @PathParam("field") FieldName fieldName,
+      @PathParam("tag") TagName tagName) {
+    throwIfNotExists(namespaceName);
+    throwIfNotExists(namespaceName, datasetName);
+    throwIfNotExists(namespaceName, datasetName, fieldName);
+    log.info(
+        "Deleting Tag '{}' from field '{}' on dataset '{}' in namespace '{}'.",
+        tagName.getValue(),
+        fieldName.getValue(),
+        datasetName.getValue(),
+        namespaceName.getValue());
+
+    // delete tag from field
+    datasetFieldService.deleteDatasetFieldTag(
+        namespaceName.getValue(),
+        datasetName.getValue(),
+        fieldName.getValue(),
+        tagName.getValue().toUpperCase(Locale.getDefault()));
+    // delete tag from dataset_versions
+    datasetFieldService.deleteDatasetVersionFieldTag(
+        namespaceName.getValue(),
+        datasetName.getValue(),
+        fieldName.getValue(),
+        tagName.getValue().toUpperCase(Locale.getDefault()));
+    // return entire dataset
+    Dataset dataset =
+        datasetService
+            .findDatasetByName(namespaceName.getValue(), datasetName.getValue())
+            .orElseThrow(() -> new DatasetNotFoundException(datasetName));
+    return Response.ok(dataset).build();
+  }
+
   @Value
   static class DatasetVersions {
     @NonNull
     @JsonProperty("versions")
     List<DatasetVersion> value;
+
+    @JsonProperty("totalCount")
+    int totalCount;
   }
 }

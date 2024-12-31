@@ -11,11 +11,12 @@
 # Usage: $ ./db-migration.sh
 
 # Version of PostgreSQL
-readonly POSTGRES_VERSION="12.1"
+readonly POSTGRES_VERSION="14"
 # Version of Marquez
-readonly MARQUEZ_VERSION=0.31.0
+readonly MARQUEZ_VERSION=0.50.0
 # Build version of Marquez
 readonly MARQUEZ_BUILD_VERSION="$(git log --pretty=format:'%h' -n 1)" # SHA1
+readonly POSTGRES_PORT=5432
 
 readonly DB_MIGRATION_VOLUME="marquez_db-backup"
 readonly DB_MIGRATION_BACKUP="db-migration-backup"
@@ -63,6 +64,7 @@ if ! ./docker/up.sh \
   --args "--exit-code-from seed_marquez" \
   --tag "${MARQUEZ_VERSION}" \
   --no-web \
+  --no-search \
   --seed > /dev/null; then
   error "failed to start db using backup!"
   exit_with_cause
@@ -76,6 +78,7 @@ log "start db using backup (marquez=${MARQUEZ_BUILD_VERSION}):"
 if ! ./docker/up.sh \
   --args "--exit-code-from seed_marquez" \
   --no-web \
+  --no-search \
   --no-volumes \
   --build \
   --seed > /dev/null; then

@@ -1,6 +1,11 @@
-const merge = require('webpack-merge')
+const { merge } = require('webpack-merge')
 const webpack = require('webpack')
 const webpackShared = require('./webpack.common.js')
+const CopyPlugin = require('copy-webpack-plugin')
+const path = require('path')
+
+// look for elkjs package folder
+const elkjsRoot = path.dirname(require.resolve('elkjs/package.json'));
 
 const webpackDev = {
   mode: 'development',
@@ -22,7 +27,7 @@ const webpackDev = {
     },
     proxy: {
       '/api': {
-        target: `http://${process.env.MARQUEZ_HOST || 'localhost'}:${process.env.MARQUEZ_PORT || 8080}/`,
+        target: `http://${process.env.MARQUEZ_HOST || 'localhost'}:${process.env.MARQUEZ_PORT || 5000}/`,
         secure: false,
         logLevel: 'debug',
         headers: {
@@ -36,13 +41,20 @@ const webpackDev = {
   plugins: [
     new webpack.DefinePlugin({
       __DEVELOPMENT__: JSON.stringify(true),
+      __REACT_APP_ADVANCED_SEARCH__: true,
       __API_URL__: JSON.stringify('/api/v1'),
+      __API_BETA_URL__: JSON.stringify('/api/v2beta'),
       __NODE_ENV__: JSON.stringify('development'),
       __TEMP_ACTOR_STR__: JSON.stringify('me'),
       __FEEDBACK_FORM_URL__: JSON.stringify('https://forms.gle/f3tTSrZ8wPj3sHTA7'),
       __API_DOCS_URL__: JSON.stringify('https://marquezproject.github.io/marquez/openapi.html')
-    })
+    }),
+      new CopyPlugin({
+        patterns: [
+          { from: path.join(elkjsRoot, 'lib/elk-worker.min.js'), to: 'elk-worker.min.js' },
+        ],
+      }),
   ]
 }
 
-module.exports = merge.smart(webpackShared, webpackDev)
+module.exports = merge(webpackShared, webpackDev)

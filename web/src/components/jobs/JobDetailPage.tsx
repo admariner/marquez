@@ -1,186 +1,320 @@
 // Copyright 2018-2023 contributors to the Marquez project
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { ChangeEvent, FunctionComponent, SetStateAction, useEffect } from 'react'
+import React, { ChangeEvent, FunctionComponent, useEffect } from 'react'
 
 import '../../i18n/config'
 import * as Redux from 'redux'
-import { Box, Button, CircularProgress, Tab, Tabs } from '@material-ui/core'
-import { IState } from '../../store/reducers'
+import { Box, Button, CircularProgress, Divider, Grid, Tab, Tabs } from '@mui/material'
+import { CalendarIcon } from '@mui/x-date-pickers'
 import {
-  Theme as ITheme,
-  WithStyles as IWithStyles,
-  createStyles,
-  withStyles
-} from '@material-ui/core/styles'
-import { LineageJob } from '../lineage/types'
-import { Run } from '../../types/api'
-import { alpha } from '@material-ui/core/styles'
+  DirectionsRun,
+  EscalatorWarning,
+  Speed,
+  SportsScore,
+  Start,
+  Title,
+} from '@mui/icons-material'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { IState } from '../../store/reducers'
+import { Job, Run } from '../../types/api'
+import { LineageJob } from '../../types/lineage'
+import { MqInfo } from '../core/info/MqInfo'
+import { Nullable } from '../../types/util/Nullable'
+import { alpha, createTheme } from '@mui/material/styles'
 import { bindActionCreators } from 'redux'
 import { connect } from 'react-redux'
 import {
   deleteJob,
   dialogToggle,
-  fetchRuns,
+  fetchJob,
+  fetchLatestRuns,
   resetJobs,
-  resetRuns
+  resetRuns,
+  setTabIndex,
 } from '../../store/actionCreators'
-import { jobRunsStatus } from '../../helpers/nodes'
-import { theme } from '../../helpers/theme'
-import { useHistory } from 'react-router-dom'
-import CloseIcon from '@material-ui/icons/Close'
+import { faCog } from '@fortawesome/free-solid-svg-icons/faCog'
+import { formatUpdatedAt } from '../../helpers'
+import { runStateColor } from '../../helpers/nodes'
+import { stopWatchDuration } from '../../helpers/time'
+import { truncateText } from '../../helpers/text'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useTheme } from '@emotion/react'
+import CloseIcon from '@mui/icons-material/Close'
 import Dialog from '../Dialog'
-import IconButton from '@material-ui/core/IconButton'
+import IconButton from '@mui/material/IconButton'
+import JobTags from './JobTags'
+import MQTooltip from '../core/tooltip/MQTooltip'
 import MqEmpty from '../core/empty/MqEmpty'
 import MqStatus from '../core/status/MqStatus'
 import MqText from '../core/text/MqText'
 import RunInfo from './RunInfo'
 import Runs from './Runs'
 
-const styles = ({ spacing }: ITheme) => {
-  return createStyles({
-    root: {
-      padding: spacing(2)
-    },
-    buttonDelete: {
-      borderColor: theme.palette.error.main,
-      color: theme.palette.error.main,
-      '&:hover': {
-        borderColor: alpha(theme.palette.error.main, 0.3),
-        backgroundColor: alpha(theme.palette.error.main, 0.3)
-      }
-    }
-  })
-}
-
 interface DispatchProps {
-  fetchRuns: typeof fetchRuns
+  fetchLatestRuns: typeof fetchLatestRuns
   resetRuns: typeof resetRuns
   resetJobs: typeof resetJobs
   deleteJob: typeof deleteJob
   dialogToggle: typeof dialogToggle
+  setTabIndex: typeof setTabIndex
+  fetchJob: typeof fetchJob
 }
 
-type IProps = IWithStyles<typeof styles> & {
-  job: LineageJob
+type IProps = {
+  lineageJob: LineageJob
+  job: Nullable<Job>
+  isJobLoading: boolean
   jobs: IState['jobs']
-  runs: Run[]
-  runsLoading: boolean
   display: IState['display']
+  tabIndex: IState['lineage']['tabIndex']
+  latestRuns: Run[]
+  isLatestRunsLoading: boolean
 } & DispatchProps
 
-const JobDetailPage: FunctionComponent<IProps> = props => {
+const JobDetailPage: FunctionComponent<IProps> = (props) => {
+  const theme = createTheme(useTheme())
   const {
     job,
+    isJobLoading,
+    lineageJob,
     jobs,
-    classes,
-    fetchRuns,
+    fetchLatestRuns,
     resetRuns,
     deleteJob,
     dialogToggle,
-    runs,
     display,
-    runsLoading
+    tabIndex,
+    setTabIndex,
+    fetchJob,
+    isLatestRunsLoading,
   } = props
-  const history = useHistory()
+  const navigate = useNavigate()
+  const [_, setSearchParams] = useSearchParams()
 
-  const [tab, setTab] = React.useState(0)
-  const handleChange = (event: ChangeEvent, newValue: SetStateAction<number>) => {
-    setTab(newValue)
+  const handleChange = (_: ChangeEvent, newValue: number) => {
+    setTabIndex(newValue)
   }
+
   const i18next = require('i18next')
 
   useEffect(() => {
-    fetchRuns(job.name, job.namespace)
-  }, [job.name])
+    fetchJob(lineageJob.namespace, lineageJob.name)
+    fetchLatestRuns(lineageJob.name, lineageJob.namespace)
+  }, [lineageJob.name])
 
   useEffect(() => {
     if (jobs.deletedJobName) {
-      history.push('/')
+      navigate('/')
     }
   }, [jobs.deletedJobName])
 
   // unmounting
   useEffect(() => {
     return () => {
-      resetRuns()
       resetJobs()
+      resetRuns()
+      setTabIndex(0)
     }
   }, [])
 
-  if (runsLoading) {
+  if (!job || isJobLoading || isLatestRunsLoading) {
     return (
-      <Box display={'flex'} justifyContent={'center'}>
+      <Box display={'flex'} justifyContent={'center'} mt={2}>
         <CircularProgress color='primary' />
       </Box>
     )
   }
 
+  const lastFinished = (() => {
+    const last = job.latestRuns?.find((run) => run.state !== 'RUNNING')
+    return last ? formatUpdatedAt(last.endedAt) : 'N/A'
+  })()
+
+  const lastRuntime = (() => {
+    const last = job.latestRuns?.find((run) => run.state !== 'RUNNING')
+    return last ? stopWatchDuration(last.durationMs) : 'N/A'
+  })()
+
   return (
-    <Box
-      p={4}
-      display='flex'
-      flexDirection='column'
-      justifyContent='space-between'
-      className={classes.root}
-    >
-      <Box mb={2} display={'flex'} justifyContent={'space-between'} alignItems={'center'}>
-        <Tabs value={tab} onChange={handleChange} textColor='primary' indicatorColor='primary'>
+    <Box px={2} display='flex' flexDirection='column' justifyContent='space-between'>
+      <Box
+        position={'sticky'}
+        top={0}
+        bgcolor={theme.palette.background.default}
+        py={2}
+        zIndex={theme.zIndex.appBar}
+        sx={{ borderBottom: 1, borderColor: 'divider', width: '100%' }}
+        mb={2}
+      >
+        <Box display={'flex'} alignItems={'center'} justifyContent={'space-between'}>
+          <Box>
+            <Box display={'flex'} alignItems={'center'}>
+              <Box
+                mr={2}
+                borderRadius={theme.spacing(1)}
+                p={1}
+                width={32}
+                height={32}
+                display={'flex'}
+                bgcolor={theme.palette.primary.main}
+              >
+                <FontAwesomeIcon
+                  aria-hidden={'true'}
+                  title={'Job'}
+                  icon={faCog}
+                  width={16}
+                  height={16}
+                  color={theme.palette.common.white}
+                />
+              </Box>
+              <MqText font={'mono'} heading>
+                {truncateText(job.name, 40)}
+              </MqText>
+            </Box>
+            {job.description && (
+              <Box mt={1}>
+                <MqText subdued>{job.description}</MqText>
+              </Box>
+            )}
+          </Box>
+          <Box display={'flex'} alignItems={'center'}>
+            <Box mr={1}>
+              <Button
+                variant='outlined'
+                size={'small'}
+                sx={{
+                  borderColor: theme.palette.error.main,
+                  color: theme.palette.error.main,
+                  '&:hover': {
+                    borderColor: alpha(theme.palette.error.main, 0.3),
+                    backgroundColor: alpha(theme.palette.error.main, 0.3),
+                  },
+                }}
+                onClick={() => {
+                  props.dialogToggle('')
+                }}
+              >
+                {i18next.t('jobs.dialog_delete')}
+              </Button>
+              <Dialog
+                dialogIsOpen={display.dialogIsOpen}
+                dialogToggle={dialogToggle}
+                title={i18next.t('jobs.dialog_confirmation_title')}
+                ignoreWarning={() => {
+                  deleteJob(job.name, job.namespace)
+                  props.dialogToggle('')
+                }}
+              />
+            </Box>
+            <Box mr={1}>
+              <Button
+                size={'small'}
+                variant='outlined'
+                color='primary'
+                target={'_blank'}
+                href={job.location}
+                disabled={!job.location}
+              >
+                {i18next.t('jobs.location')}
+              </Button>
+            </Box>
+            <IconButton onClick={() => setSearchParams({})} size='small'>
+              <CloseIcon fontSize={'small'} />
+            </IconButton>
+          </Box>
+        </Box>
+      </Box>
+      <Grid container spacing={2}>
+        <Grid item xs={3}>
+          <MqInfo
+            icon={<CalendarIcon color={'disabled'} />}
+            label={'Created at'.toUpperCase()}
+            value={formatUpdatedAt(job.createdAt)}
+          />
+        </Grid>
+        <Grid item xs={3}>
+          <MqInfo
+            icon={<CalendarIcon color={'disabled'} />}
+            label={'Updated at'.toUpperCase()}
+            value={formatUpdatedAt(job.updatedAt)}
+          />
+        </Grid>
+        <Grid item xs={3}>
+          <MqInfo
+            icon={<Speed color={'disabled'} />}
+            label={'Last Runtime'.toUpperCase()}
+            value={lastRuntime}
+          />
+        </Grid>
+        <Grid item xs={3}>
+          <MqInfo
+            icon={<Title color={'disabled'} />}
+            label={'Type'.toUpperCase()}
+            value={job.type ? job.type : 'N/A'}
+          />
+        </Grid>
+        <Grid item xs={3}>
+          <MqInfo
+            icon={<Start color={'disabled'} />}
+            label={'Last Started'.toUpperCase()}
+            value={job.latestRun ? formatUpdatedAt(job.latestRun.startedAt) : 'N/A'}
+          />
+        </Grid>
+        <Grid item xs={3}>
+          <MqInfo
+            icon={<SportsScore color={'disabled'} />}
+            label={'Last Finished'.toUpperCase()}
+            value={lastFinished}
+          />
+        </Grid>
+        <Grid item xs={3}>
+          <MqInfo
+            icon={<DirectionsRun color={'disabled'} />}
+            label={'Running Status'.toUpperCase()}
+            value={
+              <MqStatus
+                label={job.latestRun?.state || 'N/A'}
+                color={
+                  job.latestRun?.state
+                    ? runStateColor(job.latestRun.state)
+                    : theme.palette.secondary.main
+                }
+              />
+            }
+          />
+        </Grid>
+        <Grid item xs={3}>
+          <MqInfo
+            icon={<EscalatorWarning color={'disabled'} />}
+            label={'Parent Job'.toUpperCase()}
+            value={
+              job.parentJobName ? (
+                <MQTooltip title={job.parentJobName}>
+                  <>{truncateText(job.parentJobName, 16)}</>
+                </MQTooltip>
+              ) : (
+                'N/A'
+              )
+            }
+          />
+        </Grid>
+      </Grid>
+      <Divider sx={{ my: 1 }} />
+      <JobTags jobTags={job.tags} jobName={job.name} namespace={job.namespace} />
+      <Box
+        mb={2}
+        display={'flex'}
+        justifyContent={'space-between'}
+        alignItems={'center'}
+        sx={{ borderBottom: 1, borderColor: 'divider', width: '100%' }}
+      >
+        <Tabs value={tabIndex} onChange={handleChange} textColor='primary' indicatorColor='primary'>
           <Tab label={i18next.t('jobs.latest_tab')} disableRipple={true} />
           <Tab label={i18next.t('jobs.history_tab')} disableRipple={true} />
         </Tabs>
-        <Box display={'flex'} alignItems={'center'}>
-          <Box mr={1}>
-            <Button
-              variant='outlined'
-              className={classes.buttonDelete}
-              onClick={() => {
-                props.dialogToggle('')
-              }}
-            >
-              {i18next.t('jobs.dialog_delete')}
-            </Button>
-            <Dialog
-              dialogIsOpen={display.dialogIsOpen}
-              dialogToggle={dialogToggle}
-              title={i18next.t('jobs.dialog_confirmation_title')}
-              ignoreWarning={() => {
-                deleteJob(job.name, job.namespace)
-                props.dialogToggle('')
-              }}
-            />
-          </Box>
-          <Box mr={1}>
-            <Button
-              variant='outlined'
-              color='primary'
-              target={'_blank'}
-              href={job.location}
-              disabled={!job.location}
-            >
-              {i18next.t('jobs.location')}
-            </Button>
-          </Box>
-          <IconButton onClick={() => history.push('/')}>
-            <CloseIcon />
-          </IconButton>
-        </Box>
       </Box>
-      <Box display={'flex'} alignItems={'center'}>
-        {runs.length && (
-          <Box mr={1}>
-            <MqStatus color={jobRunsStatus(runs)} />
-          </Box>
-        )}
-        <MqText font={'mono'} heading>
-          {job.name}
-        </MqText>
-      </Box>
-
-      <Box mt={1}>
-        <MqText subdued>{job.description}</MqText>
-      </Box>
-      {tab === 0 ? (
+      {tabIndex === 0 ? (
         job.latestRun ? (
           <RunInfo run={job.latestRun} />
         ) : (
@@ -189,28 +323,33 @@ const JobDetailPage: FunctionComponent<IProps> = props => {
           )
         )
       ) : null}
-      {tab === 1 && <Runs runs={runs} />}
+      {tabIndex === 1 && <Runs jobName={job.name} jobNamespace={job.namespace} />}
     </Box>
   )
 }
 
 const mapStateToProps = (state: IState) => ({
-  runs: state.runs.result,
-  runsLoading: state.runs.isLoading,
+  latestRuns: state.runs.latestRuns,
+  isLatestRunsLoading: state.runs.isLatestRunsLoading,
   display: state.display,
-  jobs: state.jobs
+  jobs: state.jobs,
+  tabIndex: state.lineage.tabIndex,
+  job: state.job.result,
+  isJobLoading: state.job.isLoading,
 })
 
 const mapDispatchToProps = (dispatch: Redux.Dispatch) =>
   bindActionCreators(
     {
-      fetchRuns: fetchRuns,
+      fetchLatestRuns: fetchLatestRuns,
       resetRuns: resetRuns,
       resetJobs: resetJobs,
       deleteJob: deleteJob,
-      dialogToggle: dialogToggle
+      dialogToggle: dialogToggle,
+      setTabIndex: setTabIndex,
+      fetchJob: fetchJob,
     },
     dispatch
   )
 
-export default connect(mapStateToProps, mapDispatchToProps)(withStyles(styles)(JobDetailPage))
+export default connect(mapStateToProps, mapDispatchToProps)(JobDetailPage)

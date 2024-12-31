@@ -12,7 +12,10 @@ import com.codahale.metrics.annotation.ResponseMetered;
 import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import javax.validation.Valid;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotNull;
@@ -42,6 +45,8 @@ import marquez.common.models.FacetType;
 import marquez.common.models.JobName;
 import marquez.common.models.NamespaceName;
 import marquez.common.models.RunId;
+import marquez.common.models.RunState;
+import marquez.common.models.TagName;
 import marquez.common.models.Version;
 import marquez.db.JobFacetsDao;
 import marquez.db.JobVersionDao;
@@ -110,7 +115,7 @@ public class JobResource extends BaseResource {
 
     final Job job =
         jobService
-            .findWithRun(namespaceName.getValue(), jobName.getValue())
+            .findWithDatasetsAndRun(namespaceName.getValue(), jobName.getValue())
             .orElseThrow(() -> new JobNotFoundException(jobName));
     return Response.ok(job).build();
   }
@@ -159,16 +164,37 @@ public class JobResource extends BaseResource {
   @ResponseMetered
   @ExceptionMetered
   @GET
+  @Path("/jobs")
+  @Produces(APPLICATION_JSON)
+  public Response list(
+      @QueryParam("lastRunStates") List<RunState> lastRunStates,
+      @QueryParam("limit") @DefaultValue("100") @Min(value = 0) int limit,
+      @QueryParam("offset") @DefaultValue("0") @Min(value = 0) int offset) {
+    return list(null, lastRunStates, limit, offset);
+  }
+
+  @Timed
+  @ResponseMetered
+  @ExceptionMetered
+  @GET
   @Path("/namespaces/{namespace}/jobs")
   @Produces(APPLICATION_JSON)
   public Response list(
       @PathParam("namespace") NamespaceName namespaceName,
+      @QueryParam("lastRunStates") List<RunState> lastRunStates,
       @QueryParam("limit") @DefaultValue("100") @Min(value = 0) int limit,
       @QueryParam("offset") @DefaultValue("0") @Min(value = 0) int offset) {
-    throwIfNotExists(namespaceName);
+    final Optional<NamespaceName> namespaceOrNull = Optional.ofNullable(namespaceName);
+    final String namespace = namespaceOrNull.map(NamespaceName::getValue).orElse(null);
 
-    final List<Job> jobs = jobService.findAllWithRun(namespaceName.getValue(), limit, offset);
-    final int totalCount = jobService.countFor(namespaceName.getValue());
+    // default to all run states if not specified
+    if (lastRunStates.isEmpty()) {
+      lastRunStates = new ArrayList<>();
+      Collections.addAll(lastRunStates, RunState.values());
+    }
+
+    final List<Job> jobs = jobService.findAllWithRun(namespace, lastRunStates, limit, offset);
+    final int totalCount = jobService.countFor(namespace);
     return Response.ok(new ResultsPage<>("jobs", jobs, totalCount)).build();
   }
 
@@ -187,8 +213,7 @@ public class JobResource extends BaseResource {
             .findJobByName(namespaceName.getValue(), jobName.getValue())
             .orElseThrow(() -> new JobNotFoundException(jobName));
 
-    // Should be simple name from `jobs_fqn`.
-    jobService.delete(namespaceName.getValue(), job.getSimpleName());
+    jobService.delete(namespaceName.getValue(), job.getName().getValue());
     return Response.ok(job).build();
   }
 
@@ -238,7 +263,8 @@ public class JobResource extends BaseResource {
 
     final List<Run> runs =
         runService.findAll(namespaceName.getValue(), jobName.getValue(), limit, offset);
-    return Response.ok(new Runs(runs)).build();
+    final int totalCount = jobService.countJobRuns(namespaceName.getValue(), jobName.getValue());
+    return Response.ok(new Runs(runs, totalCount)).build();
   }
 
   @Path("/jobs/runs/{id}")
@@ -274,6 +300,47 @@ public class JobResource extends BaseResource {
     return Response.ok(facets).build();
   }
 
+  @Timed
+  @ResponseMetered
+  @ExceptionMetered
+  @POST
+  @Path("/namespaces/{namespace}/jobs/{job}/tags/{tag}")
+  @Produces(APPLICATION_JSON)
+  public Response updatetag(
+      @PathParam("namespace") NamespaceName namespaceName,
+      @PathParam("job") JobName jobName,
+      @PathParam("tag") TagName tagName) {
+    throwIfNotExists(namespaceName);
+    throwIfNotExists(namespaceName, jobName);
+
+    jobService.updateJobTags(namespaceName.getValue(), jobName.getValue(), tagName.getValue());
+    Job job =
+        jobService
+            .findJobByName(namespaceName.getValue(), jobName.getValue())
+            .orElseThrow(() -> new JobNotFoundException(jobName));
+    return Response.ok(job).build();
+  }
+
+  @ResponseMetered
+  @ExceptionMetered
+  @DELETE
+  @Path("/namespaces/{namespace}/jobs/{job}/tags/{tag}")
+  @Produces(APPLICATION_JSON)
+  public Response deletetag(
+      @PathParam("namespace") NamespaceName namespaceName,
+      @PathParam("job") JobName jobName,
+      @PathParam("tag") TagName tagName) {
+    throwIfNotExists(namespaceName);
+    throwIfNotExists(namespaceName, jobName);
+
+    jobService.deleteJobTags(namespaceName.getValue(), jobName.getValue(), tagName.getValue());
+    Job job =
+        jobService
+            .findJobByName(namespaceName.getValue(), jobName.getValue())
+            .orElseThrow(() -> new JobNotFoundException(jobName));
+    return Response.ok(job).build();
+  }
+
   @Value
   static class JobVersions {
     @NonNull
@@ -288,5 +355,8 @@ public class JobResource extends BaseResource {
     @NonNull
     @JsonProperty("runs")
     List<Run> value;
+
+    @JsonProperty("totalCount")
+    int totalCount;
   }
 }

@@ -4,19 +4,20 @@
 import * as Redux from 'redux'
 import {
   Button,
+  Chip,
   Container,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
-  Theme,
-  Tooltip
-} from '@material-ui/core'
-import { ChevronLeftRounded, ChevronRightRounded } from '@material-ui/icons'
+  createTheme,
+} from '@mui/material'
 import { Event } from '../../types/api'
+import { HEADER_HEIGHT } from '../../helpers/theme'
 import { IState } from '../../store/reducers'
 import { MqScreenLoad } from '../../components/core/screen-load/MqScreenLoad'
+import { Refresh } from '@mui/icons-material'
 import { bindActionCreators } from 'redux'
 import { connect } from 'react-redux'
 import { eventTypeColor } from '../../helpers/nodes'
@@ -24,42 +25,26 @@ import { fetchEvents, resetEvents } from '../../store/actionCreators'
 import { fileSize, formatUpdatedAt } from '../../helpers'
 import { formatDateAPIQuery, formatDatePicker } from '../../helpers/time'
 import { saveAs } from 'file-saver'
-import Box from '@material-ui/core/Box'
-import IconButton from '@material-ui/core/IconButton'
+import { truncateText } from '../../helpers/text'
+import { useSearchParams } from 'react-router-dom'
+import { useTheme } from '@emotion/react'
+import Box from '@mui/material/Box'
+import CircularProgress from '@mui/material/CircularProgress/CircularProgress'
+import IconButton from '@mui/material/IconButton'
+import MQTooltip from '../../components/core/tooltip/MQTooltip'
+import MqCopy from '../../components/core/copy/MqCopy'
 import MqDatePicker from '../../components/core/date-picker/MqDatePicker'
 import MqEmpty from '../../components/core/empty/MqEmpty'
+import MqJsonView from '../../components/core/json-view/MqJsonView'
+import MqPaging from '../../components/paging/MqPaging'
 import MqStatus from '../../components/core/status/MqStatus'
 import MqText from '../../components/core/text/MqText'
-import MqJsonView from '../../components/core/json-view/MqJsonView'
-import React from 'react'
-import createStyles from '@material-ui/core/styles/createStyles'
+import React, { useEffect, useRef } from 'react'
 import moment from 'moment'
-import withStyles, { WithStyles } from '@material-ui/core/styles/withStyles'
-
-const styles = (theme: Theme) => {
-  return createStyles({
-    nav: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: theme.spacing(2)
-    },
-    table: {
-      marginBottom: theme.spacing(2)
-    },
-    row: {
-      cursor: 'pointer',
-      '&:hover': {
-        backgroundColor: theme.palette.action.hover
-      }
-    },
-    ml2: {
-      marginLeft: theme.spacing(2)
-    }
-  })
-}
 
 interface StateProps {
   events: Event[]
+  totalCount: number
   isEventsLoading: boolean
   isEventsInit: boolean
 }
@@ -70,7 +55,6 @@ interface EventsState {
   dateFrom: string
   dateTo: string
   page: number
-  pageIsLast: boolean
 }
 
 interface DispatchProps {
@@ -78,282 +62,325 @@ interface DispatchProps {
   resetEvents: typeof resetEvents
 }
 
-type EventsProps = WithStyles<typeof styles> & StateProps & DispatchProps
+type EventsProps = StateProps & DispatchProps
 
 const EVENTS_COLUMNS = ['ID', 'STATE', 'NAME', 'NAMESPACE', 'TIME']
 
-class Events extends React.Component<EventsProps, EventsState> {
-  pageSize: number
+const PAGE_SIZE = 50
+const EVENTS_HEADER_HEIGHT = 64
 
-  constructor(props: EventsProps) {
-    super(props)
-    this.state = {
-      page: 1,
-      events: [],
-      rowExpanded: null,
-      pageIsLast: false,
-      dateFrom: formatDateAPIQuery(
-        moment()
-          .startOf('day')
-          .toString()
-      ),
-      dateTo: formatDateAPIQuery(
-        moment()
-          .endOf('day')
-          .toString()
-      )
+const Events: React.FC<EventsProps> = ({
+  events,
+  totalCount,
+  isEventsLoading,
+  isEventsInit,
+  fetchEvents,
+  resetEvents,
+}) => {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [state, setState] = React.useState<EventsState>({
+    page: 0,
+    events: [],
+    rowExpanded: null,
+    dateFrom:
+      searchParams.get('dateFrom') || formatDateAPIQuery(moment().startOf('day').toString()),
+    dateTo: searchParams.get('dateTo') || formatDateAPIQuery(moment().endOf('day').toString()),
+  })
+
+  const mounted = useRef<boolean>(false)
+
+  useEffect(() => {
+    if (!mounted.current) {
+      // on mount
+      fetchEvents(state.dateFrom, state.dateTo, PAGE_SIZE, state.page * PAGE_SIZE)
+      mounted.current = true
+    } else {
+      // on update
+      if (events !== state.events) {
+        setState({
+          ...state,
+          events: events,
+        })
+      }
     }
-    this.pageSize = 20
-  }
+  })
 
-  componentDidMount() {
-    const { dateFrom, dateTo } = this.state
-    this.props.fetchEvents(dateFrom, dateTo, this.pageSize)
-  }
-
-  componentDidUpdate() {
-    const { events: eventsState, page } = this.state
-    const { events: eventsProps } = this.props
-
-    if (eventsProps !== eventsState) {
-      this.setState({
-        events: eventsProps,
-        pageIsLast: eventsProps.length < page * this.pageSize
+  useEffect(() => {
+    if (!searchParams.get('dateFrom') && !searchParams.get('dateTo')) {
+      setSearchParams({
+        dateFrom: formatDateAPIQuery(moment().startOf('day').toString()),
+        dateTo: formatDateAPIQuery(moment().endOf('day').toString()),
       })
     }
-  }
+  }, [])
 
-  componentWillUnmount() {
-    this.props.resetEvents()
-  }
+  useEffect(() => {
+    return () => {
+      // on unmount
+      resetEvents()
+    }
+  }, [])
 
-  getEvents() {
-    const { events, page } = this.state
-    return events.slice((page - 1) * this.pageSize, this.pageSize + (page - 1) * this.pageSize)
-  }
-
-  pageNavigation() {
-    const { events, page } = this.state
-    const titlePos = events.length
-      ? `${this.pageSize * page - this.pageSize} - ${events.length}`
-      : `${events.length}`
-    return `${page} (${titlePos})`
-  }
-
-  handleChangeDatepicker(e: any, direction: 'from' | 'to') {
-    const { dateFrom, dateTo } = this.state
+  const handleChangeDatepicker = (e: any, direction: 'from' | 'to') => {
     const isDirectionFrom = direction === 'from'
     const keyDate = isDirectionFrom ? 'dateFrom' : 'dateTo'
 
-    this.props.fetchEvents(
-      formatDateAPIQuery(isDirectionFrom ? e.toDate() : dateFrom),
-      formatDateAPIQuery(isDirectionFrom ? dateTo : e.toDate()),
-      this.pageSize
+    fetchEvents(
+      formatDateAPIQuery(isDirectionFrom ? e.toDate() : state.dateFrom),
+      formatDateAPIQuery(isDirectionFrom ? state.dateTo : e.toDate()),
+      PAGE_SIZE,
+      state.page * PAGE_SIZE
     )
 
-    this.setState({ [keyDate]: formatDatePicker(e.toDate()), page: 1, rowExpanded: null } as any)
+    const params: { [key: string]: string } = {}
+    searchParams.forEach((value, key) => (params[key] = value))
+    setSearchParams({ ...params, [keyDate]: formatDateAPIQuery(e.toDate()) })
+    setState({
+      ...state,
+      [keyDate]: formatDatePicker(e.toDate()),
+      page: 0,
+      rowExpanded: null,
+    } as any)
   }
 
-  handleClickPage(direction: 'prev' | 'next') {
-    const { dateFrom, dateTo, page } = this.state
-    const directionPage = direction === 'next' ? page + 1 : page - 1
+  const handleClickPage = (direction: 'prev' | 'next') => {
+    const directionPage = direction === 'next' ? state.page + 1 : state.page - 1
 
-    this.props.fetchEvents(
-      formatDateAPIQuery(dateFrom),
-      formatDateAPIQuery(dateTo),
-      this.pageSize * directionPage
+    fetchEvents(
+      formatDateAPIQuery(state.dateFrom),
+      formatDateAPIQuery(state.dateTo),
+      PAGE_SIZE,
+      directionPage * PAGE_SIZE
     )
-    this.setState({ page: directionPage, rowExpanded: null })
+    // reset page scroll
+    window.scrollTo(0, 0)
+    setState({ ...state, page: directionPage, rowExpanded: null })
   }
 
-  handleDownloadPayload(data: Event) {
+  const handleDownloadPayload = (data: Event) => {
     const title = `${data.job.name}-${data.eventType}-${data.run.runId}`
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
     saveAs(blob, `${title}.json`)
   }
 
-  render() {
-    const { classes, isEventsLoading, isEventsInit } = this.props
-    const { events, rowExpanded, page, dateFrom, dateTo, pageIsLast } = this.state
-    const i18next = require('i18next')
+  const refresh = () => {
+    const dateFrom =
+      searchParams.get('dateFrom') || formatDateAPIQuery(moment().startOf('day').toString())
+    const dateTo =
+      searchParams.get('dateTo') || formatDateAPIQuery(moment().endOf('day').toString())
+    fetchEvents(dateFrom, dateTo, PAGE_SIZE, state.page * PAGE_SIZE)
+  }
 
-    return (
-      <Container maxWidth={'lg'} disableGutters>
-        <MqScreenLoad loading={isEventsLoading || !isEventsInit}>
-          <>
-            <Box p={2} display={'flex'} justifyContent={'space-between'}>
-              <Box>
+  const i18next = require('i18next')
+  const theme = createTheme(useTheme())
+
+  return (
+    <Container maxWidth={'lg'} disableGutters>
+      <MqScreenLoad
+        loading={!isEventsInit}
+        customHeight={`calc(100vh - ${HEADER_HEIGHT}px - ${EVENTS_HEADER_HEIGHT}px)`}
+      >
+        <>
+          <Box p={2} display={'flex'} justifyContent={'space-between'}>
+            <Box>
+              <Box display={'flex'} alignItems={'center'}>
                 <MqText heading>{i18next.t('events_route.title')}</MqText>
-                Page: {this.pageNavigation()}
-              </Box>
-              <Box>
-                <Tooltip title={i18next.t('events_route.previous_page')}>
-                  <IconButton
-                    className={classes.ml2}
-                    color='primary'
-                    disabled={page === 1}
-                    onClick={() => this.handleClickPage('prev')}
-                  >
-                    <ChevronLeftRounded />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title={i18next.t('events_route.next_page')}>
-                  <IconButton
-                    color='primary'
-                    disabled={pageIsLast}
-                    onClick={() => this.handleClickPage('next')}
-                  >
-                    <ChevronRightRounded />
-                  </IconButton>
-                </Tooltip>
+                {!isEventsLoading && (
+                  <Chip
+                    size={'small'}
+                    variant={'outlined'}
+                    color={'primary'}
+                    sx={{ marginLeft: 1 }}
+                    label={totalCount + ' total'}
+                  ></Chip>
+                )}
               </Box>
             </Box>
-            <Box p={2} className={classes.nav}>
+            <MQTooltip title={'Refresh'}>
+              <IconButton
+                color={'primary'}
+                size={'small'}
+                onClick={() => {
+                  refresh()
+                }}
+              >
+                <Refresh fontSize={'small'} />
+              </IconButton>
+            </MQTooltip>
+          </Box>
+          <Box
+            p={2}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: theme.spacing(3),
+            }}
+          >
+            <Box display={'flex'}>
               <MqDatePicker
                 label={i18next.t('events_route.from_date')}
-                value={formatDatePicker(dateFrom)}
-                onChange={(e: any) => this.handleChangeDatepicker(e, 'from')}
+                value={formatDatePicker(state.dateFrom)}
+                onChange={(e: any) => handleChangeDatepicker(e, 'from')}
               />
+              <Box sx={{ marginLeft: theme.spacing(2) }} />
               <MqDatePicker
                 label={i18next.t('events_route.to_date')}
-                value={formatDatePicker(dateTo)}
-                onChange={(e: any) => this.handleChangeDatepicker(e, 'to')}
+                value={formatDatePicker(state.dateTo)}
+                onChange={(e: any) => handleChangeDatepicker(e, 'to')}
               />
             </Box>
-            {events.length === 0 ? (
-              <Box p={2}>
-                <MqEmpty title={i18next.t('events_route.empty_title')}>
+            {isEventsLoading && <CircularProgress size={16} />}
+          </Box>
+          {state.events?.length === 0 ? (
+            <Box p={2}>
+              <MqEmpty title={i18next.t('events_route.empty_title')}>
+                <>
                   <MqText subdued>{i18next.t('events_route.empty_body')}</MqText>
-                </MqEmpty>
-              </Box>
-            ) : (
-              <>
-                <Table className={classes.table} size='small'>
-                  <TableHead>
-                    <TableRow>
-                      {/* {EVENTS_COLUMNS.map(field => {
-                        return ( */}
-                      <TableCell align='left'>
-                        <MqText subheading>{i18next.t('events_columns.id')}</MqText>
-                      </TableCell>
-                      <TableCell align='left'>
-                        <MqText subheading>{i18next.t('events_columns.state')}</MqText>
-                      </TableCell>
-                      <TableCell align='left'>
-                        <MqText subheading>{i18next.t('events_columns.name')}</MqText>
-                      </TableCell>
-                      <TableCell align='left'>
-                        <MqText subheading>{i18next.t('events_columns.namespace')}</MqText>
-                      </TableCell>
-                      <TableCell align='left'>
-                        <MqText subheading>{i18next.t('events_columns.time')}</MqText>
-                      </TableCell>
-                      {/* )
-                      })} */}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {this.getEvents().map((event, key: number) => {
-                      return (
-                        <React.Fragment key={key}>
-                          <TableRow
-                            className={classes.row}
-                            onClick={() => {
-                              this.setState({ rowExpanded: key === rowExpanded ? null : key })
-                            }}
-                          >
-                            <TableCell align='left'>
-                              <MqText>{event.run.runId}</MqText>
-                            </TableCell>
-                            <TableCell align='left'>
-                              <MqStatus
-                                color={eventTypeColor(event.eventType)}
-                                label={event.eventType}
-                              />
-                            </TableCell>
-                            <TableCell align='left'>{event.job.name}</TableCell>
-                            <TableCell align='left'>
-                              <MqText> {event.job.namespace} </MqText>
-                            </TableCell>
-                            <TableCell align='left'>
-                              <MqText>{formatUpdatedAt(event.eventTime)}</MqText>
+                  <Button
+                    color={'primary'}
+                    size={'small'}
+                    onClick={() => {
+                      refresh()
+                    }}
+                  >
+                    Refresh
+                  </Button>
+                </>
+              </MqEmpty>
+            </Box>
+          ) : (
+            <>
+              <Table
+                sx={{
+                  marginBottom: theme.spacing(2),
+                }}
+                size='small'
+              >
+                <TableHead>
+                  <TableRow>
+                    <TableCell align='left'>
+                      <MqText subheading>{i18next.t('events_columns.id')}</MqText>
+                    </TableCell>
+                    <TableCell align='left'>
+                      <MqText subheading>{i18next.t('events_columns.state')}</MqText>
+                    </TableCell>
+                    <TableCell align='left'>
+                      <MqText subheading>{i18next.t('events_columns.name')}</MqText>
+                    </TableCell>
+                    <TableCell align='left'>
+                      <MqText subheading>{i18next.t('events_columns.namespace')}</MqText>
+                    </TableCell>
+                    <TableCell align='left'>
+                      <MqText subheading>{i18next.t('events_columns.time')}</MqText>
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {events.map((event, key: number) => {
+                    return (
+                      <React.Fragment key={key}>
+                        <TableRow
+                          sx={{
+                            cursor: 'pointer',
+                            '&:hover': {
+                              backgroundColor: theme.palette.action.hover,
+                            },
+                          }}
+                          onClick={() => {
+                            setState({
+                              ...state,
+                              rowExpanded: key === state.rowExpanded ? null : key,
+                            })
+                          }}
+                        >
+                          <TableCell align='left'>
+                            <Box display={'flex'} alignItems={'center'}>
+                              <MqText font={'mono'}>{event.run.runId}</MqText>
+                              <MqCopy string={event.run.runId} />
+                            </Box>
+                          </TableCell>
+                          <TableCell align='left'>
+                            <MqStatus
+                              color={eventTypeColor(event.eventType)}
+                              label={event.eventType}
+                            />
+                          </TableCell>
+                          <TableCell align='left'>
+                            <MQTooltip title={event.job.name}>
+                              <Box display={'inline'}>{truncateText(event.job.name, 40)}</Box>
+                            </MQTooltip>
+                          </TableCell>
+                          <TableCell align='left'>
+                            <MQTooltip title={event.job.namespace}>
+                              <Box display={'inline'}>{truncateText(event.job.namespace, 40)}</Box>
+                            </MQTooltip>
+                          </TableCell>
+                          <TableCell align='left'>
+                            <MqText>{formatUpdatedAt(event.eventTime)}</MqText>
+                          </TableCell>
+                        </TableRow>
+                        {state.rowExpanded === key && (
+                          <TableRow>
+                            <TableCell colSpan={EVENTS_COLUMNS.length}>
+                              {fileSize(JSON.stringify(event)).kiloBytes > 500 ? (
+                                <Box p={2}>
+                                  <MqEmpty title={'Payload is too big for render'}>
+                                    <div>
+                                      <MqText subdued>
+                                        Please click on button and download payload as file
+                                      </MqText>
+                                      <br />
+                                      <Button
+                                        variant='outlined'
+                                        color='primary'
+                                        onClick={() => handleDownloadPayload(event)}
+                                      >
+                                        Download payload
+                                      </Button>
+                                    </div>
+                                  </MqEmpty>
+                                </Box>
+                              ) : (
+                                <MqJsonView data={event} />
+                              )}
                             </TableCell>
                           </TableRow>
-                          {rowExpanded === key && (
-                            <TableRow>
-                              <TableCell colSpan={EVENTS_COLUMNS.length}>
-                                {fileSize(JSON.stringify(event)).kiloBytes > 500 ? (
-                                  <Box p={2}>
-                                    <MqEmpty title={'Payload is too big for render'}>
-                                      <div>
-                                        <MqText subdued>
-                                          Please click on button and download payload as file
-                                        </MqText>
-                                        <br />
-                                        <Button
-                                          variant='outlined'
-                                          color='primary'
-                                          onClick={() => this.handleDownloadPayload(event)}
-                                        >
-                                          Download payload
-                                        </Button>
-                                      </div>
-                                    </MqEmpty>
-                                  </Box>
-                                ) : (
-                                  <MqJsonView data={event} />
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </React.Fragment>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
-              </>
-            )}
-            <Box display={'flex'} justifyContent={'flex-end'} mb={2}>
-              <Tooltip title={i18next.t('events_route.previous_page')}>
-                <IconButton
-                  className={classes.ml2}
-                  color='primary'
-                  disabled={page === 1}
-                  onClick={() => this.handleClickPage('prev')}
-                >
-                  <ChevronLeftRounded />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title={i18next.t('events_route.next_page')}>
-                <IconButton
-                  color='primary'
-                  disabled={pageIsLast}
-                  onClick={() => this.handleClickPage('next')}
-                >
-                  <ChevronRightRounded />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </>
-        </MqScreenLoad>
-      </Container>
-    )
-  }
+                        )}
+                      </React.Fragment>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+              <MqPaging
+                pageSize={PAGE_SIZE}
+                currentPage={state.page}
+                totalCount={totalCount}
+                incrementPage={() => handleClickPage('next')}
+                decrementPage={() => handleClickPage('prev')}
+              />
+            </>
+          )}
+        </>
+      </MqScreenLoad>
+    </Container>
+  )
 }
 
 const mapStateToProps = (state: IState) => ({
-  events: state.events.result,
-  isEventsLoading: state.events.isLoading,
-  isEventsInit: state.events.init
+  events: state.events?.result,
+  totalCount: state.events.totalCount,
+  isEventsLoading: state.events?.isLoading,
+  isEventsInit: state.events?.init,
 })
 
 const mapDispatchToProps = (dispatch: Redux.Dispatch) =>
   bindActionCreators(
     {
       fetchEvents: fetchEvents,
-      resetEvents: resetEvents
+      resetEvents: resetEvents,
     },
     dispatch
   )
 
-export default connect(mapStateToProps, mapDispatchToProps)(withStyles(styles)(Events))
+export default connect(mapStateToProps, mapDispatchToProps)(Events)

@@ -2,121 +2,103 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as Redux from 'redux'
-import { Box, Button, Chip, Tab, Tabs } from '@material-ui/core'
-import { DatasetVersion } from '../../types/api'
-import { IState } from '../../store/reducers'
 import {
-  Theme as ITheme,
-  WithStyles as IWithStyles,
-  createStyles,
-  withStyles
-} from '@material-ui/core/styles'
-import { LineageDataset } from '../lineage/types'
-import { alpha } from '@material-ui/core/styles'
+  Box,
+  Button,
+  Divider,
+  FormControlLabel,
+  Grid,
+  Switch,
+  Tab,
+  Tabs,
+  createTheme,
+} from '@mui/material'
+import { CalendarIcon } from '@mui/x-date-pickers'
+import { CircularProgress } from '@mui/material'
+import { Dataset } from '../../types/api'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { IState } from '../../store/reducers'
+import { LineageDataset } from '../../types/lineage'
+import { MqInfo } from '../core/info/MqInfo'
+import { alpha } from '@mui/material/styles'
 import { bindActionCreators } from 'redux'
 import { connect } from 'react-redux'
-import { datasetFacetsStatus } from '../../helpers/nodes'
+import { datasetFacetsQualityAssertions, datasetFacetsStatus } from '../../helpers/nodes'
 import {
   deleteDataset,
   dialogToggle,
-  fetchDatasetVersions,
+  fetchDataset,
   resetDataset,
-  resetDatasetVersions
+  resetDatasetVersions,
+  setTabIndex,
 } from '../../store/actionCreators'
-import { theme } from '../../helpers/theme'
-import { useHistory } from 'react-router-dom'
-import CircularProgress from '@material-ui/core/CircularProgress/CircularProgress'
-import CloseIcon from '@material-ui/icons/Close'
-import DatasetColumnLineage from './DatasetColumnLineage'
+import { faDatabase } from '@fortawesome/free-solid-svg-icons'
+import { formatUpdatedAt } from '../../helpers'
+import { truncateText } from '../../helpers/text'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useTheme } from '@emotion/react'
+import Assertions from './Assertions'
+import CloseIcon from '@mui/icons-material/Close'
 import DatasetInfo from './DatasetInfo'
+import DatasetTags from './DatasetTags'
 import DatasetVersions from './DatasetVersions'
 import Dialog from '../Dialog'
-import IconButton from '@material-ui/core/IconButton'
+import IconButton from '@mui/material/IconButton'
+import ListIcon from '@mui/icons-material/List'
+import MQTooltip from '../core/tooltip/MQTooltip'
 import MqStatus from '../core/status/MqStatus'
 import MqText from '../core/text/MqText'
-
-import React, { ChangeEvent, FunctionComponent, SetStateAction, useEffect } from 'react'
-
-const styles = ({ spacing }: ITheme) => {
-  return createStyles({
-    root: {
-      padding: `0 ${spacing(2)}px`
-    },
-    tagList: {
-      display: 'flex',
-      flexWrap: 'wrap',
-      listStyle: 'none',
-      margin: 0,
-      padding: 0
-    },
-    tag: {
-      '&:not(:last-of-type)': {
-        marginRight: spacing(1)
-      }
-    },
-    buttonDelete: {
-      borderColor: theme.palette.error.main,
-      color: theme.palette.error.main,
-      '&:hover': {
-        borderColor: alpha(theme.palette.error.main, 0.3),
-        backgroundColor: alpha(theme.palette.error.main, 0.3)
-      }
-    }
-  })
-}
+import React, { ChangeEvent, FunctionComponent, useEffect, useState } from 'react'
+import RuleIcon from '@mui/icons-material/Rule'
+import StorageIcon from '@mui/icons-material/Storage'
 
 interface StateProps {
   lineageDataset: LineageDataset
-  versions: DatasetVersion[]
-  versionsLoading: boolean
+  dataset: Dataset
+  isDatasetLoading: boolean
   datasets: IState['datasets']
   display: IState['display']
+  tabIndex: IState['lineage']['tabIndex']
 }
 
 interface DispatchProps {
-  fetchDatasetVersions: typeof fetchDatasetVersions
+  fetchDataset: typeof fetchDataset
   resetDatasetVersions: typeof resetDatasetVersions
   resetDataset: typeof resetDataset
   deleteDataset: typeof deleteDataset
   dialogToggle: typeof dialogToggle
+  setTabIndex: typeof setTabIndex
 }
 
-type IProps = IWithStyles<typeof styles> & StateProps & DispatchProps
+type IProps = StateProps & DispatchProps
 
 function a11yProps(index: number) {
   return {
     id: `tab-${index}`,
-    'aria-controls': `simple-tabpanel-${index}`
+    'aria-controls': `simple-tabpanel-${index}`,
   }
 }
 
-const DatasetDetailPage: FunctionComponent<IProps> = props => {
+const DatasetDetailPage: FunctionComponent<IProps> = (props) => {
   const {
-    classes,
     datasets,
+    dataset,
+    isDatasetLoading,
     display,
-    fetchDatasetVersions,
+    fetchDataset,
     resetDataset,
     resetDatasetVersions,
     deleteDataset,
     dialogToggle,
-    versions,
-    versionsLoading,
-    lineageDataset
+    lineageDataset,
+    tabIndex,
+    setTabIndex,
   } = props
-  const { root } = classes
-  const history = useHistory()
+  const navigate = useNavigate()
   const i18next = require('i18next')
-
-  useEffect(() => {
-    fetchDatasetVersions(props.lineageDataset.namespace, props.lineageDataset.name)
-  }, [props.lineageDataset.name])
-
-  useEffect(() => {
-    if (datasets.deletedDatasetName) {
-      history.push('/datasets')
-    }
-  }, [datasets.deletedDatasetName])
+  const theme = createTheme(useTheme())
+  const [_, setSearchParams] = useSearchParams()
+  const [showTags, setShowTags] = useState(false)
 
   // unmounting
   useEffect(
@@ -127,64 +109,87 @@ const DatasetDetailPage: FunctionComponent<IProps> = props => {
     []
   )
 
-  const [tab, setTab] = React.useState(0)
-  const handleChange = (event: ChangeEvent, newValue: SetStateAction<number>) => {
-    setTab(newValue)
+  // might need to map first version to its own state
+  useEffect(() => {
+    fetchDataset(lineageDataset.namespace, lineageDataset.name)
+  }, [lineageDataset.name])
+
+  // if the dataset is deleted then redirect to datasets end point
+  useEffect(() => {
+    if (datasets.deletedDatasetName) {
+      navigate('/datasets')
+    }
+  }, [datasets.deletedDatasetName])
+
+  const handleChange = (_: ChangeEvent, newValue: number) => {
+    setTabIndex(newValue)
   }
 
-  if (versionsLoading) {
+  if (!dataset || isDatasetLoading) {
     return (
-      <Box display={'flex'} justifyContent={'center'}>
+      <Box display={'flex'} justifyContent={'center'} mt={2}>
         <CircularProgress color='primary' />
       </Box>
     )
   }
 
-  if (versions.length === 0) {
-    return null
-  }
-
-  const firstVersion = versions[0]
-  const { name, tags, description } = firstVersion
-  const facetsStatus = datasetFacetsStatus(firstVersion.facets)
+  const { name, tags, description } = dataset
+  const facetsStatus = datasetFacetsStatus(dataset.facets)
+  const assertions = datasetFacetsQualityAssertions(dataset.facets)
 
   return (
-    <Box my={2} className={root}>
-      <Box>
-        {tags.length > 0 && (
-          <ul className={classes.tagList}>
-            {tags.map(tag => (
-              <li key={tag} className={classes.tag}>
-                <Chip size='small' label={tag} />
-              </li>
-            ))}
-          </ul>
-        )}
-        <Box display={'flex'} justifyContent={'space-between'} mb={2}>
-          <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-            <Tabs value={tab} onChange={handleChange} textColor='primary' indicatorColor='primary'>
-              <Tab
-                label={i18next.t('datasets.latest_tab')}
-                {...a11yProps(0)}
-                disableRipple={true}
-              />
-              <Tab
-                label={i18next.t('datasets.history_tab')}
-                {...a11yProps(1)}
-                disableRipple={true}
-              />
-              <Tab
-                label={i18next.t('datasets.column_lineage_tab')}
-                {...a11yProps(1)}
-                disableRipple={true}
-              />
-            </Tabs>
+    <Box px={2}>
+      <Box
+        position={'sticky'}
+        top={0}
+        bgcolor={theme.palette.background.default}
+        pt={2}
+        zIndex={theme.zIndex.appBar}
+        sx={{ borderBottom: 1, borderColor: 'divider', width: '100%' }}
+        mb={2}
+      >
+        <Box display={'flex'} alignItems={'center'} justifyContent={'space-between'} pb={2}>
+          <Box display={'flex'} alignItems={'center'}>
+            <Box>
+              <Box display={'flex'} alignItems={'center'}>
+                <Box
+                  mr={2}
+                  borderRadius={theme.spacing(1)}
+                  p={1}
+                  width={32}
+                  height={32}
+                  display={'flex'}
+                  bgcolor={theme.palette.info.main}
+                >
+                  <FontAwesomeIcon
+                    aria-hidden={'true'}
+                    title={'Dataset'}
+                    icon={faDatabase}
+                    width={16}
+                    height={16}
+                    color={theme.palette.common.white}
+                  />
+                </Box>
+                <MqText font={'mono'} heading>
+                  {truncateText(name, 40)}
+                </MqText>
+              </Box>
+              <MqText subdued>{description}</MqText>
+            </Box>
           </Box>
           <Box display={'flex'} alignItems={'center'}>
             <Box mr={1}>
               <Button
                 variant='outlined'
-                className={classes.buttonDelete}
+                size={'small'}
+                sx={{
+                  borderColor: theme.palette.error.main,
+                  color: theme.palette.error.main,
+                  '&:hover': {
+                    borderColor: alpha(theme.palette.error.main, 0.3),
+                    backgroundColor: alpha(theme.palette.error.main, 0.3),
+                  },
+                }}
                 onClick={() => {
                   props.dialogToggle('')
                 }}
@@ -201,55 +206,156 @@ const DatasetDetailPage: FunctionComponent<IProps> = props => {
                 }}
               />
             </Box>
-            <IconButton onClick={() => history.push('/datasets')}>
-              <CloseIcon />
+            <IconButton onClick={() => setSearchParams({})}>
+              <CloseIcon fontSize={'small'} />
             </IconButton>
           </Box>
         </Box>
-        <Box display={'flex'} alignItems={'center'}>
-          {facetsStatus && (
-            <Box mr={1}>
-              <MqStatus color={facetsStatus} />
-            </Box>
-          )}
-          <MqText heading font={'mono'}>
-            {name}
-          </MqText>
-        </Box>
-        <Box mb={2}>
-          <MqText subdued>{description}</MqText>
-        </Box>
       </Box>
-      {tab === 0 && (
+      <Grid container spacing={2}>
+        <Grid item xs={6}>
+          <MqInfo
+            icon={<CalendarIcon color={'disabled'} />}
+            label={'Updated at'.toUpperCase()}
+            value={formatUpdatedAt(dataset.createdAt)}
+          />
+        </Grid>
+        <Grid item xs={6}>
+          <MqInfo
+            icon={<StorageIcon color={'disabled'} />}
+            label={'Dataset Type'.toUpperCase()}
+            value={<MqText font={'mono'}>{dataset.type}</MqText>}
+          />
+        </Grid>
+        <Grid item xs={6}>
+          <MqInfo
+            icon={<ListIcon color={'disabled'} />}
+            label={'Fields'.toUpperCase()}
+            value={`${dataset.fields.length} columns`}
+          />
+        </Grid>
+        <Grid item xs={6}>
+          <MqInfo
+            icon={<RuleIcon color={'disabled'} />}
+            label={'Quality'.toUpperCase()}
+            value={
+              facetsStatus ? (
+                <Box display={'flex'}>
+                  <MQTooltip
+                    title={
+                      <Assertions
+                        assertions={assertions.filter((assertion) => assertion.success)}
+                      />
+                    }
+                  >
+                    <Box>
+                      <MqStatus
+                        label={`${
+                          assertions.filter((assertion) => assertion.success).length
+                        } Passing`.toUpperCase()}
+                        color={theme.palette.primary.main}
+                      />
+                    </Box>
+                  </MQTooltip>
+                  <Divider sx={{ mx: 1 }} orientation={'vertical'} />
+                  <MQTooltip
+                    title={
+                      <Assertions
+                        assertions={assertions.filter((assertion) => !assertion.success)}
+                      />
+                    }
+                  >
+                    <Box>
+                      <MqStatus
+                        label={`${
+                          assertions.filter((assertion) => !assertion.success).length
+                        } Failing`.toUpperCase()}
+                        color={theme.palette.error.main}
+                      />
+                    </Box>
+                  </MQTooltip>
+                </Box>
+              ) : (
+                <MqStatus label={'N/A'} color={theme.palette.secondary.main} />
+              )
+            }
+          />
+        </Grid>
+      </Grid>
+      <Divider sx={{ my: 2 }} />
+      <Box display={'flex'} justifyContent={'space-between'} alignItems={'center'}>
+        <DatasetTags
+          datasetTags={tags}
+          datasetName={lineageDataset.name}
+          namespace={lineageDataset.namespace}
+        />
+      </Box>
+      <Box display={'flex'} justifyContent={'space-between'} mb={2}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', width: '100%' }}>
+          <Tabs
+            value={tabIndex}
+            onChange={handleChange}
+            textColor='primary'
+            indicatorColor='primary'
+          >
+            <Tab label={i18next.t('datasets.latest_tab')} {...a11yProps(0)} disableRipple={true} />
+            <Tab label={i18next.t('datasets.history_tab')} {...a11yProps(2)} disableRipple={true} />
+          </Tabs>
+        </Box>
+        {tabIndex === 0 && (
+          <Box display={'flex'} alignItems={'center'}>
+            <FormControlLabel
+              sx={{
+                textWrap: 'nowrap',
+                '& .MuiFormControlLabel-label': { fontSize: '0.875rem' },
+              }}
+              control={
+                <Switch
+                  size={'small'}
+                  checked={showTags}
+                  onChange={() => setShowTags(!showTags)}
+                  inputProps={{ 'aria-label': 'toggle show tags' }}
+                  disabled={isDatasetLoading}
+                />
+              }
+              label={i18next.t('datasets.show_field_tags')}
+            />
+          </Box>
+        )}
+      </Box>
+      {tabIndex === 0 && (
         <DatasetInfo
-          datasetFields={firstVersion.fields}
-          facets={firstVersion.facets}
-          run={firstVersion.createdByRun}
+          dataset={dataset}
+          datasetFields={dataset.fields}
+          facets={dataset.facets}
+          showTags={showTags}
+          isCurrentVersion
         />
       )}
-      {tab === 1 && <DatasetVersions versions={props.versions} />}
-      {tab === 2 && <DatasetColumnLineage lineageDataset={props.lineageDataset} />}
+      {tabIndex === 1 && <DatasetVersions dataset={dataset} />}
     </Box>
   )
 }
 
 const mapStateToProps = (state: IState) => ({
   datasets: state.datasets,
+  dataset: state.dataset.result,
+  isDatasetLoading: state.dataset.isLoading,
   display: state.display,
-  versions: state.datasetVersions.result.versions,
-  versionsLoading: state.datasetVersions.isLoading
+  tabIndex: state.lineage.tabIndex,
 })
 
 const mapDispatchToProps = (dispatch: Redux.Dispatch) =>
   bindActionCreators(
     {
-      fetchDatasetVersions: fetchDatasetVersions,
+      fetchDataset: fetchDataset,
       resetDatasetVersions: resetDatasetVersions,
       resetDataset: resetDataset,
       deleteDataset: deleteDataset,
-      dialogToggle: dialogToggle
+      dialogToggle: dialogToggle,
+      setTabIndex: setTabIndex,
     },
     dispatch
   )
 
-export default connect(mapStateToProps, mapDispatchToProps)(withStyles(styles)(DatasetDetailPage))
+export default connect(mapStateToProps, mapDispatchToProps)(DatasetDetailPage)

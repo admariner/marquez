@@ -1,37 +1,36 @@
 // Copyright 2018-2023 contributors to the Marquez project
 // SPDX-License-Identifier: Apache-2.0
 
-import { Box, Theme, Tooltip, WithStyles, createStyles, withStyles } from '@material-ui/core'
+import { Box, createTheme } from '@mui/material'
 import { Run } from '../../types/api'
 import { runStateColor } from '../../helpers/nodes'
 
+import { useTheme } from '@emotion/react'
+import MQTooltip from '../core/tooltip/MQTooltip'
 import React, { FunctionComponent } from 'react'
-
-const styles = (theme: Theme) => {
-  return createStyles({
-    status: {
-      width: theme.spacing(2),
-      height: theme.spacing(2),
-      borderRadius: '50%'
-    }
-  })
-}
 
 interface RunStatusProps {
   run: Run
 }
 
-const RunStatus: FunctionComponent<RunStatusProps & WithStyles<typeof styles>> = props => {
-  const { run, classes } = props
+const RunStatus: FunctionComponent<RunStatusProps> = (props) => {
+  const { run } = props
+  const theme = createTheme(useTheme())
+
   return (
-    <Tooltip title={run.state}>
+    <MQTooltip title={run.state}>
       <Box
         mr={1}
-        className={classes.status}
+        sx={{
+          minWidth: theme.spacing(2),
+          width: theme.spacing(2),
+          height: theme.spacing(2),
+          borderRadius: '50%',
+        }}
         style={{ backgroundColor: runStateColor(run.state) }}
       />
-    </Tooltip>
+    </MQTooltip>
   )
 }
 
-export default withStyles(styles)(RunStatus)
+export default RunStatus

@@ -8,6 +8,8 @@ package marquez.client.models;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.collect.ImmutableMap;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import javax.annotation.Nullable;
@@ -26,7 +28,10 @@ public final class Run extends RunMeta {
   @Nullable private final Instant startedAt;
   @Nullable private final Long durationMs;
   @Nullable private final Instant endedAt;
+  @Nullable private final JobVersionId jobVersion;
   @Getter private final Map<String, Object> facets;
+  @Getter private final List<InputDatasetVersion> inputDatasetVersions;
+  @Getter private final List<OutputDatasetVersion> outputDatasetVersions;
 
   public Run(
       @NonNull final String id,
@@ -39,7 +44,10 @@ public final class Run extends RunMeta {
       @Nullable final Instant endedAt,
       @Nullable final Long durationMs,
       @Nullable final Map<String, String> args,
-      @Nullable final Map<String, Object> facets) {
+      @Nullable final JobVersionId jobVersion,
+      @Nullable final Map<String, Object> facets,
+      @Nullable final List<InputDatasetVersion> inputDatasetVersions,
+      @Nullable final List<OutputDatasetVersion> outputDatasetVersions) {
     super(id, nominalStartTime, nominalEndTime, args);
     this.createdAt = createdAt;
     this.updatedAt = updatedAt;
@@ -47,7 +55,12 @@ public final class Run extends RunMeta {
     this.startedAt = startedAt;
     this.durationMs = durationMs;
     this.endedAt = endedAt;
+    this.jobVersion = jobVersion;
     this.facets = (facets == null) ? ImmutableMap.of() : ImmutableMap.copyOf(facets);
+    this.inputDatasetVersions =
+        (inputDatasetVersions == null) ? Collections.emptyList() : inputDatasetVersions;
+    this.outputDatasetVersions =
+        (outputDatasetVersions == null) ? Collections.emptyList() : outputDatasetVersions;
   }
 
   public Optional<Instant> getStartedAt() {
@@ -60,6 +73,10 @@ public final class Run extends RunMeta {
 
   public Optional<Long> getDurationMs() {
     return Optional.ofNullable(durationMs);
+  }
+
+  public Optional<JobVersionId> getJobVersion() {
+    return Optional.ofNullable(jobVersion);
   }
 
   public boolean hasFacets() {

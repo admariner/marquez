@@ -6,7 +6,7 @@
 # Requirements:
 #   * You're on the 'main' branch
 #   * You've installed 'bump2version'
-#   * You've installed 'redoc-cli'
+#   * You've installed 'redocly'
 #
 # Usage: $ ./new-version.sh --release-version RELEASE_VERSION --next-version NEXT_VERSION
 
@@ -59,9 +59,9 @@ if [[ ! $(type -P bump2version) ]]; then
   exit 1;
 fi
 
-# Verify redoc-cli is installed
-if [[ ! $(type -P redoc-cli) ]]; then
-  echo "redoc-cli not installed! Please see https://redoc.ly/docs/redoc/quickstart/cli"
+# Verify redocly is installed
+if [[ ! $(type -P redocly) ]]; then
+  echo "redocly not installed! Please see https://redoc.ly/docs/redoc/quickstart/cli"
   exit 1;
 fi
 
@@ -127,7 +127,7 @@ sed -i "" "s/version=.*/version=${RELEASE_VERSION}/g" gradle.properties
 
 # (2) Bump version in helm chart
 sed -i "" "s/^version:.*/version: ${RELEASE_VERSION}/g" ./chart/Chart.yaml
-sed -i "" "s/tag:.*/tag: ${RELEASE_VERSION}/g" ./chart/values.yaml
+sed -i "" -E -e "/postgresql/,\$b" -e "s/tag:.*/tag: ${RELEASE_VERSION}/g" ./chart/values.yaml
 
 # (3) Bump version in scripts
 sed -i "" "s/VERSION=.*/VERSION=${RELEASE_VERSION}/g" ./docker/up.sh
@@ -140,7 +140,7 @@ sed -i "" "s/<version>.*/<version>${RELEASE_VERSION}<\/version>/g" ./clients/jav
 sed -i "" "s/marquez-java:.*/marquez-java:${RELEASE_VERSION}/g" ./clients/java/README.md
 
 # (5) Bundle openAPI docs
-redoc-cli bundle spec/openapi.yml --output docs/openapi.html --title "Marquez API Reference"
+redocly build-docs spec/openapi.yml --output docs/openapi.html --title "Marquez API Reference"
 
 # (6) Prepare release commit
 git commit -sam "Prepare for release ${RELEASE_VERSION}" --no-verify
@@ -162,6 +162,7 @@ if [[ "${NEXT_VERSION}" == *-rc.? ||
 fi
 sed -i "" "s/version=.*/version=${NEXT_VERSION}/g" gradle.properties
 sed -i "" "s/^  version:.*/  version: ${NEXT_VERSION}/g" ./spec/openapi.yml
+sed -i "" "s/MARQUEZ_VERSION=.*/MARQUEZ_VERSION=${NEXT_VERSION}/g" ./.circleci/api-load-test.sh
 
 # (9) Prepare next development version commit
 git commit -sam "Prepare next development version ${NEXT_VERSION}" --no-verify

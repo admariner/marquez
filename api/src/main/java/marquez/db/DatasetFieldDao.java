@@ -78,14 +78,58 @@ public interface DatasetFieldDao extends BaseDao {
                       .collect(Collectors.toList());
               datasetVersionDao.updateFields(ver, datasetVersionDao.toPgObjectFields(fields));
             });
-
     updateTags(fieldUuid, tag.getUuid(), now);
     return createDatasetDao().findDatasetByName(namespaceName, datasetName).get();
   }
 
   @SqlUpdate(
+      """
+      DELETE FROM dataset_fields_tag_mapping dftm
+      WHERE EXISTS
+      (
+          SELECT 1
+          FROM
+              dataset_fields df
+          JOIN datasets d ON df.dataset_uuid = d.uuid AND df.uuid = dftm.dataset_field_uuid
+          JOIN tags t ON dftm.tag_uuid = t.uuid
+          JOIN namespaces n ON d.namespace_uuid = n.uuid
+          WHERE d.name = :datasetName
+          AND t.name = :tagName
+          AND n.name = :namespaceName
+          AND df.name = :fieldName
+      );
+    """)
+  void deleteDatasetFieldTag(
+      String namespaceName, String datasetName, String fieldName, String tagName);
+
+  @SqlUpdate(
+      """
+        UPDATE dataset_versions
+        SET fields = (
+            SELECT jsonb_agg(
+                CASE
+                    WHEN elem->>'name' = :fieldName AND elem->'tags' @> jsonb_build_array(:tagName)
+                    THEN jsonb_set(elem, '{tags}', (elem->'tags') - :tagName)
+                    ELSE elem
+                END
+            )
+            FROM jsonb_array_elements(fields) AS elem
+        )
+        WHERE dataset_name = :datasetName AND namespace_name = :namespaceName
+        AND
+        EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(fields) AS elem
+            WHERE elem->>'name' = :fieldName
+            AND elem->'tags' @> jsonb_build_array(:tagName)
+        )
+    """)
+  void deleteDatasetVersionFieldTag(
+      String namespaceName, String datasetName, String fieldName, String tagName);
+
+  @SqlUpdate(
       "INSERT INTO dataset_fields_tag_mapping (dataset_field_uuid, tag_uuid, tagged_at) "
-          + "VALUES (:rowUuid, :tagUuid, :taggedAt)")
+          + "VALUES (:rowUuid, :tagUuid, :taggedAt) ON CONFLICT DO NOTHING")
   void updateTags(UUID rowUuid, UUID tagUuid, Instant taggedAt);
 
   @SqlBatch(
@@ -176,7 +220,18 @@ public interface DatasetFieldDao extends BaseDao {
           + "FROM dataset_fields f "
           + "INNER JOIN dataset_versions_field_mapping fm on fm.dataset_field_uuid = f.uuid "
           + "WHERE fm.dataset_version_uuid = :datasetVersionUuid")
-  List<Field> find(UUID datasetVersionUuid);
+  List<Field> findByDatasetVersion(UUID datasetVersionUuid);
+
+  @SqlQuery(
+      "SELECT f.*, "
+          + "ARRAY(SELECT t.name "
+          + "      FROM dataset_fields_tag_mapping m "
+          + "      INNER JOIN tags t on t.uuid = m.tag_uuid "
+          + "      WHERE m.dataset_field_uuid = f.uuid) AS tags "
+          + "FROM dataset_fields f "
+          + "INNER JOIN dataset_schema_versions_field_mapping fm on fm.dataset_field_uuid = f.uuid "
+          + "WHERE fm.dataset_schema_version_uuid = :datasetSchemaVersionUuid")
+  List<Field> findByDatasetSchemaVersion(UUID datasetSchemaVersionUuid);
 
   @SqlQuery(
       """

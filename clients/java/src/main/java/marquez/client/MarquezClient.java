@@ -24,6 +24,7 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.Consumer;
 import javax.annotation.Nullable;
 import javax.net.ssl.SSLContext;
 import lombok.AllArgsConstructor;
@@ -54,6 +55,7 @@ import marquez.client.models.SearchSort;
 import marquez.client.models.Source;
 import marquez.client.models.SourceMeta;
 import marquez.client.models.Tag;
+import org.apache.http.impl.client.HttpClientBuilder;
 
 @Slf4j
 public class MarquezClient {
@@ -114,6 +116,15 @@ public class MarquezClient {
     ASC("asc");
 
     @Getter public final String value;
+  }
+
+  public Lineage getLineage(NodeId nodeId) {
+    return getLineage(nodeId, DEFAULT_LINEAGE_GRAPH_DEPTH);
+  }
+
+  public Lineage getLineage(NodeId nodeId, int depth) {
+    final String bodyAsJson = http.get(url.toLineageUrl(nodeId, depth));
+    return Lineage.fromJson(bodyAsJson);
   }
 
   public Lineage getColumnLineage(NodeId nodeId) {
@@ -225,9 +236,27 @@ public class MarquezClient {
     return Datasets.fromJson(bodyAsJson).getValue();
   }
 
+  public Job tagJobWith(
+      @NonNull String namespaceName, @NonNull String jobName, @NonNull String tagName) {
+    final String bodyAsJson = http.post(url.toJobTagUrl(namespaceName, jobName, tagName));
+    return Job.fromJson(bodyAsJson);
+  }
+
+  public Job deleteJobTag(
+      @NonNull String namespaceName, @NonNull String datasetName, @NonNull String tagName) {
+    final String bodyAsJson = http.delete(url.toJobTagUrl(namespaceName, datasetName, tagName));
+    return Job.fromJson(bodyAsJson);
+  }
+
   public Dataset tagDatasetWith(
       @NonNull String namespaceName, @NonNull String datasetName, @NonNull String tagName) {
     final String bodyAsJson = http.post(url.toDatasetTagUrl(namespaceName, datasetName, tagName));
+    return Dataset.fromJson(bodyAsJson);
+  }
+
+  public Dataset deleteDatasetTag(
+      @NonNull String namespaceName, @NonNull String datasetName, @NonNull String tagName) {
+    final String bodyAsJson = http.delete(url.toDatasetTagUrl(namespaceName, datasetName, tagName));
     return Dataset.fromJson(bodyAsJson);
   }
 
@@ -238,6 +267,16 @@ public class MarquezClient {
       @NonNull String tagName) {
     final String bodyAsJson =
         http.post(url.toFieldTagURL(namespaceName, datasetName, fieldName, tagName));
+    return Dataset.fromJson(bodyAsJson);
+  }
+
+  public Dataset deleteDatasetFieldTag(
+      @NonNull String namespaceName,
+      @NonNull String datasetName,
+      @NonNull String fieldName,
+      @NonNull String tagName) {
+    final String bodyAsJson =
+        http.delete(url.toFieldTagURL(namespaceName, datasetName, fieldName, tagName));
     return Dataset.fromJson(bodyAsJson);
   }
 
@@ -469,6 +508,7 @@ public class MarquezClient {
     @VisibleForTesting URL baseUrl;
     @VisibleForTesting @Nullable String apiKey;
     @VisibleForTesting @Nullable SSLContext sslContext;
+    @VisibleForTesting @Nullable Consumer<HttpClientBuilder> httpCustomizer;
 
     private Builder() {
       this.baseUrl = DEFAULT_BASE_URL;
@@ -493,10 +533,15 @@ public class MarquezClient {
       return this;
     }
 
+    public Builder customize(@Nullable Consumer<HttpClientBuilder> httpCustomizer) {
+      this.httpCustomizer = httpCustomizer;
+      return this;
+    }
+
     public MarquezClient build() {
       return new MarquezClient(
           MarquezUrl.create(baseUrl),
-          MarquezHttp.create(sslContext, MarquezClient.Version.get(), apiKey));
+          MarquezHttp.create(sslContext, httpCustomizer, MarquezClient.Version.get(), apiKey));
     }
   }
 

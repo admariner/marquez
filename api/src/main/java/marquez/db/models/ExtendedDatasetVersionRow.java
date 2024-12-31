@@ -15,6 +15,7 @@ import lombok.ToString;
 
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
+@Deprecated
 public class ExtendedDatasetVersionRow extends DatasetVersionRow {
   @Getter private @NonNull String namespaceName;
   @Getter private @NonNull String datasetName;
@@ -24,11 +25,21 @@ public class ExtendedDatasetVersionRow extends DatasetVersionRow {
       @NonNull Instant createdAt,
       @NonNull UUID datasetUuid,
       @NonNull UUID version,
+      @Nullable UUID schemaVersionUuid,
       @Nullable String lifecycleState,
       UUID runUuid,
       @NonNull final String namespaceName,
       @NonNull final String datasetName) {
-    super(uuid, createdAt, datasetUuid, version, lifecycleState, runUuid);
+    super(
+        uuid,
+        createdAt,
+        datasetUuid,
+        version,
+        schemaVersionUuid,
+        lifecycleState,
+        runUuid,
+        namespaceName,
+        datasetName);
     this.namespaceName = namespaceName;
     this.datasetName = datasetName;
   }
