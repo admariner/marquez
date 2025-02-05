@@ -1,6 +1,9 @@
 #!/bin/bash
 #
+# Copyright 2018-2023 contributors to the Marquez project
 # SPDX-License-Identifier: Apache-2.0
+#
+# Usage: $ ./down.sh [FLAGS]
 
 set -e
 
@@ -9,14 +12,19 @@ title() {
 }
 
 usage() {
-  echo "usage: ./$(basename -- ${0}) [--api-port PORT] [--web-port PORT] [--tag TAG]"
+  echo "usage: ./$(basename -- ${0}) [FLAGS]"
   echo "A script used to bring down Marquez when run via Docker"
   echo
-  title "ARGUMENTS:"
-  echo "  -a, --api-port int          api port (default: 5000)"
-  echo "  -m, --api-admin-port int    api admin port (default: 5001)"
-  echo "  -w, --web-port int          web port (default: 3000)"
-  echo "  -t, --tag string            image tag (default: latest)"
+  title "EXAMPLES:"
+  echo "  # Stop and remove all containers"
+  echo "  $ ./down.sh"
+  echo
+  echo "  # Stop and remove all containers, remove volumes"
+  echo "  $ ./down.sh -v"
+  echo
+  title "FLAGS:"
+  echo "  -v, --volumes         remove created volumes"
+  echo "  -h, --help            show help for script"
   echo
 }
 
@@ -25,39 +33,25 @@ project_root=$(git rev-parse --show-toplevel)
 cd "${project_root}/"
 
 compose_files="-f docker-compose.yml"
-args="--remove-orphans"
 
-API_PORT=5000
-API_ADMIN_PORT=5001
-WEB_PORT=3000
-TAG=0.19.0
+# Default args
+compose_args="--remove-orphans"
+
+# Parse args
 while [ $# -gt 0 ]; do
   case $1 in
-    -a|'--api-port')
-       shift
-       API_PORT="${1}"
-       ;;
-    -m|'--api-admin-port')
-       shift
-       API_ADMIN_PORT="${1}"
-       ;;
-    -w|'--web-port')
-       shift
-       WEB_PORT="${1}"
-       ;;
-    -t|'--tag')
-       shift
-       TAG="${1}"
-       ;;
     -h|'--help')
        usage
        exit 0
        ;;
-    *) usage
-       exit 1
+    -v|'--volumes')
+       compose_args+=" -v"
        ;;
   esac
   shift
 done
 
-API_PORT=${API_PORT} API_ADMIN_PORT=${API_ADMIN_PORT} WEB_PORT=${WEB_PORT} TAG="${TAG}" docker-compose $compose_files down $args
+# We can ignore the tag and port(s) when cleaning up running
+# containers and volumes
+API_PORT=${RANDOM} API_ADMIN_PORT=${RANDOM} WEB_PORT=${RANDOM} TAG=${RANDOM} POSTGRES_PORT=${RANDOM} SEARCH_ENABLED=${RANDOM} \
+  docker compose $compose_files down $compose_args

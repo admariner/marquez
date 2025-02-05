@@ -5,6 +5,7 @@
 
 package marquez.db;
 
+import static marquez.db.LineageTestUtils.NAMESPACE;
 import static marquez.db.LineageTestUtils.PRODUCER_URL;
 import static marquez.db.LineageTestUtils.SCHEMA_URL;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -14,21 +15,30 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import marquez.common.models.DatasetName;
+import marquez.common.models.DatasetVersionId;
+import marquez.common.models.NamespaceName;
 import marquez.db.models.UpdateLineageRow;
 import marquez.db.models.UpdateLineageRow.DatasetRecord;
 import marquez.jdbi.MarquezJdbiExternalPostgresExtension;
 import marquez.service.models.LineageEvent;
 import marquez.service.models.LineageEvent.Dataset;
 import marquez.service.models.LineageEvent.DatasetFacets;
+import marquez.service.models.LineageEvent.DocumentationJobFacet;
+import marquez.service.models.LineageEvent.Job;
 import marquez.service.models.LineageEvent.JobFacet;
 import marquez.service.models.LineageEvent.SchemaDatasetFacet;
 import marquez.service.models.LineageEvent.SchemaField;
+import marquez.service.models.Run;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.assertj.core.groups.Tuple;
 import org.jdbi.v3.core.Jdbi;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 @ExtendWith(MarquezJdbiExternalPostgresExtension.class)
 class OpenLineageDaoTest {
@@ -48,6 +58,7 @@ class OpenLineageDaoTest {
   private static DatasetSymlinkDao symlinkDao;
   private static NamespaceDao namespaceDao;
   private static DatasetFieldDao datasetFieldDao;
+  private static RunDao runDao;
   private final DatasetFacets datasetFacets =
       LineageTestUtils.newDatasetFacet(
           new SchemaField("name", "STRING", "my name"), new SchemaField("age", "INT", "my age"));
@@ -58,12 +69,13 @@ class OpenLineageDaoTest {
     symlinkDao = jdbi.onDemand(DatasetSymlinkDao.class);
     namespaceDao = jdbi.onDemand(NamespaceDao.class);
     datasetFieldDao = jdbi.onDemand(DatasetFieldDao.class);
+    runDao = jdbi.onDemand(RunDao.class);
   }
 
   /** When reading a dataset, the version is assumed to be the version last written */
   @Test
   void testUpdateMarquezModel() {
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob =
         LineageTestUtils.createLineageRow(
             dao,
@@ -71,7 +83,7 @@ class OpenLineageDaoTest {
             "COMPLETE",
             jobFacet,
             Arrays.asList(),
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)));
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)));
 
     UpdateLineageRow readJob =
         LineageTestUtils.createLineageRow(
@@ -79,7 +91,7 @@ class OpenLineageDaoTest {
             READ_JOB_NAME,
             "COMPLETE",
             jobFacet,
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)),
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)),
             Arrays.asList());
 
     assertThat(writeJob.getJob().getLocation()).isNull();
@@ -87,13 +99,96 @@ class OpenLineageDaoTest {
     assertThat(readJob.getInputs()).isPresent().get().asList().size().isEqualTo(1);
     assertThat(readJob.getInputs().get().get(0).getDatasetVersionRow())
         .isEqualTo(writeJob.getOutputs().get().get(0).getDatasetVersionRow());
+
+    // ensure schema version has the right field associations
+    UUID schemaVersionUuid =
+        writeJob
+            .getOutputs()
+            .get()
+            .get(0)
+            .getDatasetVersionRow()
+            .getSchemaVersionUuid()
+            .orElseThrow();
+    assertThat(datasetFieldDao.findByDatasetSchemaVersion(schemaVersionUuid))
+        .extracting((ds) -> ds.getName().getValue())
+        .containsExactlyInAnyOrder("name", "age");
+  }
+
+  @Test
+  void testUpdateMarquezModelWithDatasetEvent() {
+    UpdateLineageRow datasetEventRow =
+        LineageTestUtils.createLineageRow(dao, new Dataset(NAMESPACE, DATASET_NAME, datasetFacets));
+
+    assertThat(datasetEventRow.getOutputs()).isPresent();
+    assertThat(datasetEventRow.getOutputs().get()).hasSize(1).first();
+    assertThat(datasetEventRow.getOutputs().get().get(0).getDatasetRow())
+        .hasFieldOrPropertyWithValue("name", DATASET_NAME)
+        .hasFieldOrPropertyWithValue("namespaceName", NAMESPACE);
+
+    assertThat(datasetEventRow.getOutputs().get().get(0).getDatasetVersionRow())
+        .hasNoNullFieldsOrPropertiesExcept("runUuid");
+  }
+
+  @Test
+  void testUpdateMarquezModelWithJobEvent() {
+    JobFacet jobFacet =
+        JobFacet.builder()
+            .documentation(DocumentationJobFacet.builder().description("documentation").build())
+            .build();
+
+    Job job = new Job(NAMESPACE, READ_JOB_NAME, jobFacet);
+
+    UpdateLineageRow jobEventRow =
+        LineageTestUtils.createLineageRow(
+            dao,
+            job,
+            Arrays.asList(
+                new LineageEvent.Dataset(
+                    "namespace",
+                    "dataset_input",
+                    LineageEvent.DatasetFacets.builder()
+                        .schema(
+                            new LineageEvent.SchemaDatasetFacet(
+                                PRODUCER_URL, SCHEMA_URL, Collections.emptyList()))
+                        .build())),
+            Arrays.asList(
+                new LineageEvent.Dataset(
+                    "namespace",
+                    "dataset_output",
+                    LineageEvent.DatasetFacets.builder()
+                        .schema(
+                            new LineageEvent.SchemaDatasetFacet(
+                                PRODUCER_URL, SCHEMA_URL, Collections.emptyList()))
+                        .lifecycleStateChange(
+                            new LineageEvent.LifecycleStateChangeFacet(
+                                PRODUCER_URL, SCHEMA_URL, "create"))
+                        .build())));
+
+    assertThat(jobEventRow.getJob().getNamespaceName()).isEqualTo(NAMESPACE);
+    assertThat(jobEventRow.getJob().getName()).isEqualTo(READ_JOB_NAME);
+    assertThat(jobEventRow.getJob().getDescription().get()).isEqualTo("documentation");
+    assertThat(jobEventRow.getJob().getLocation()).isNull();
+
+    assertThat(jobEventRow.getInputs()).isPresent();
+    assertThat(jobEventRow.getInputs().get()).hasSize(1);
+    assertThat(jobEventRow.getInputs().get().get(0).getDatasetRow())
+        .hasFieldOrPropertyWithValue("namespaceName", "namespace")
+        .hasFieldOrPropertyWithValue("name", "dataset_input");
+
+    assertThat(jobEventRow.getOutputs()).isPresent();
+    assertThat(jobEventRow.getOutputs().get()).hasSize(1);
+    assertThat(jobEventRow.getOutputs().get().get(0).getDatasetRow())
+        .hasFieldOrPropertyWithValue("namespaceName", "namespace")
+        .hasFieldOrPropertyWithValue("name", "dataset_output");
+    assertThat(jobEventRow.getOutputs().get().get(0).getDatasetVersionRow().getLifecycleState())
+        .isEqualTo("create");
   }
 
   @Test
   void testUpdateMarquezModelLifecycleStateChangeFacet() {
     Dataset dataset =
         new Dataset(
-            LineageTestUtils.NAMESPACE,
+            NAMESPACE,
             DATASET_NAME,
             LineageEvent.DatasetFacets.builder()
                 .lifecycleStateChange(
@@ -101,7 +196,7 @@ class OpenLineageDaoTest {
                         PRODUCER_URL, SCHEMA_URL, "TRUNCATE"))
                 .build());
 
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob =
         LineageTestUtils.createLineageRow(
             dao, WRITE_JOB_NAME, "COMPLETE", jobFacet, Arrays.asList(), Arrays.asList(dataset));
@@ -113,7 +208,7 @@ class OpenLineageDaoTest {
 
   @Test
   void testUpdateMarquezModelDatasetWithColumnLineageFacet() {
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob =
         LineageTestUtils.createLineageRow(
             dao,
@@ -165,7 +260,7 @@ class OpenLineageDaoTest {
 
   @Test
   void testUpdateMarquezModelDatasetWithColumnLineageFacetWhenInputFieldDoesNotExist() {
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob =
         LineageTestUtils.createLineageRow(
             dao,
@@ -183,7 +278,7 @@ class OpenLineageDaoTest {
   void testUpdateMarquezModelDatasetWithColumnLineageFacetWhenOutputFieldDoesNotExist() {
     Dataset outputDatasetWithoutOutputFieldSchema =
         new Dataset(
-            LineageTestUtils.NAMESPACE,
+            NAMESPACE,
             DATASET_NAME,
             LineageEvent.DatasetFacets.builder() // schema is missing
                 .columnLineage(
@@ -201,7 +296,7 @@ class OpenLineageDaoTest {
                                     TRANSFORMATION_TYPE)))))
                 .build());
 
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob =
         LineageTestUtils.createLineageRow(
             dao,
@@ -213,6 +308,11 @@ class OpenLineageDaoTest {
 
     // make sure no column lineage was written
     assertEquals(0, writeJob.getOutputs().get().get(0).getColumnLineageRows().size());
+  }
+
+  @Test
+  void testGetUrlOrNullReturnsEmptyString() {
+    assertEquals("", dao.getUrlOrNull(null));
   }
 
   @Test
@@ -229,7 +329,7 @@ class OpenLineageDaoTest {
 
     Dataset updateDataset =
         new Dataset(
-            LineageTestUtils.NAMESPACE,
+            NAMESPACE,
             DATASET_NAME,
             LineageEvent.DatasetFacets.builder()
                 .schema(
@@ -252,7 +352,7 @@ class OpenLineageDaoTest {
                                     UPDATED_TRANSFORMATION_TYPE)))))
                 .build());
 
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob1 =
         LineageTestUtils.createLineageRow(
             dao,
@@ -291,7 +391,7 @@ class OpenLineageDaoTest {
   void testUpdateMarquezModelDatasetWithSymlinks() {
     Dataset dataset =
         new Dataset(
-            LineageTestUtils.NAMESPACE,
+            NAMESPACE,
             DATASET_NAME,
             LineageEvent.DatasetFacets.builder()
                 .symlinks(
@@ -303,7 +403,7 @@ class OpenLineageDaoTest {
                                 "symlinkNamespace", "symlinkName", "some-type"))))
                 .build());
 
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob =
         LineageTestUtils.createLineageRow(
             dao, WRITE_JOB_NAME, "COMPLETE", jobFacet, Arrays.asList(), Arrays.asList(dataset));
@@ -343,14 +443,14 @@ class OpenLineageDaoTest {
    */
   @Test
   void testUpdateMarquezModelWithInputOnlyDataset() {
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob =
         LineageTestUtils.createLineageRow(
             dao,
             WRITE_JOB_NAME,
             "RUNNING",
             jobFacet,
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)),
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)),
             Arrays.asList());
 
     assertThat(writeJob.getInputs())
@@ -367,7 +467,7 @@ class OpenLineageDaoTest {
    */
   @Test
   void testUpdateMarquezModelWithNonMatchingReadSchema() {
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob =
         LineageTestUtils.createLineageRow(
             dao,
@@ -375,7 +475,7 @@ class OpenLineageDaoTest {
             "COMPLETE",
             jobFacet,
             Arrays.asList(),
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)));
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)));
 
     DatasetFacets overrideFacet =
         new DatasetFacets(
@@ -399,7 +499,7 @@ class OpenLineageDaoTest {
             READ_JOB_NAME,
             "COMPLETE",
             jobFacet,
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, overrideFacet)),
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, overrideFacet)),
             Arrays.asList());
 
     assertThat(writeJob.getOutputs()).isPresent().get().asList().size().isEqualTo(1);
@@ -414,7 +514,7 @@ class OpenLineageDaoTest {
    */
   @Test
   void testUpdateMarquezModelWithPriorWrites() {
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob1 =
         LineageTestUtils.createLineageRow(
             dao,
@@ -422,14 +522,14 @@ class OpenLineageDaoTest {
             "COMPLETE",
             jobFacet,
             Arrays.asList(),
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)));
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)));
     UpdateLineageRow readJob1 =
         LineageTestUtils.createLineageRow(
             dao,
             READ_JOB_NAME,
             "COMPLETE",
             jobFacet,
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)),
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)),
             Arrays.asList());
 
     UpdateLineageRow writeJob2 =
@@ -439,7 +539,7 @@ class OpenLineageDaoTest {
             "COMPLETE",
             jobFacet,
             Arrays.asList(),
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)));
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)));
     UpdateLineageRow writeJob3 =
         LineageTestUtils.createLineageRow(
             dao,
@@ -447,7 +547,7 @@ class OpenLineageDaoTest {
             "COMPLETE",
             jobFacet,
             Arrays.asList(),
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)));
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)));
 
     UpdateLineageRow readJob2 =
         LineageTestUtils.createLineageRow(
@@ -455,7 +555,7 @@ class OpenLineageDaoTest {
             READ_JOB_NAME,
             "COMPLETE",
             jobFacet,
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)),
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)),
             Arrays.asList());
 
     // verify readJob1 read the version written by writeJob1
@@ -483,11 +583,23 @@ class OpenLineageDaoTest {
 
     assertThat(readJob2.getInputs().get().get(0).getDatasetVersionRow())
         .isEqualTo(writeJob3.getOutputs().get().get(0).getDatasetVersionRow());
+
+    // verify that the dataset schema version remained the same across all runs
+    assertThat(
+            Stream.of(
+                    writeJob1.getOutputs().get().get(0),
+                    readJob1.getInputs().get().get(0),
+                    writeJob2.getOutputs().get().get(0),
+                    writeJob3.getOutputs().get().get(0),
+                    readJob2.getInputs().get().get(0))
+                .map(ds -> ds.getDatasetVersionRow().getSchemaVersionUuid().orElseThrow())
+                .collect(Collectors.toSet()))
+        .hasSize(1);
   }
 
   @Test
   void testGetOpenLineageEvents() {
-    JobFacet jobFacet = new JobFacet(null, null, null, LineageTestUtils.EMPTY_MAP);
+    JobFacet jobFacet = JobFacet.builder().build();
     UpdateLineageRow writeJob =
         LineageTestUtils.createLineageRow(
             dao,
@@ -495,7 +607,7 @@ class OpenLineageDaoTest {
             "COMPLETE",
             jobFacet,
             Arrays.asList(),
-            Arrays.asList(new Dataset(LineageTestUtils.NAMESPACE, DATASET_NAME, datasetFacets)));
+            Arrays.asList(new Dataset(NAMESPACE, DATASET_NAME, datasetFacets)));
 
     List<LineageEvent> lineageEvents = dao.findLineageEventsByRunUuid(writeJob.getRun().getUuid());
     assertThat(lineageEvents).hasSize(1);
@@ -503,9 +615,70 @@ class OpenLineageDaoTest {
     assertThat(lineageEvents.get(0).getEventType()).isEqualTo("COMPLETE");
 
     LineageEvent.Job job = lineageEvents.get(0).getJob();
-    assertThat(job)
-        .extracting("namespace", "name")
-        .contains(LineageTestUtils.NAMESPACE, WRITE_JOB_NAME);
+    assertThat(job).extracting("namespace", "name").contains(NAMESPACE, WRITE_JOB_NAME);
+  }
+
+  @Test
+  void testInputOutputDatasetFacets() {
+    JobFacet jobFacet = JobFacet.builder().build();
+    UpdateLineageRow lineageRow =
+        LineageTestUtils.createLineageRow(
+            dao,
+            WRITE_JOB_NAME,
+            "COMPLETE",
+            jobFacet,
+            Arrays.asList(
+                new Dataset(
+                    "namespace",
+                    "dataset_input",
+                    null,
+                    LineageEvent.InputDatasetFacets.builder()
+                        .additional(
+                            ImmutableMap.of(
+                                "inputFacet1", "{some-facet1}",
+                                "inputFacet2", "{some-facet2}"))
+                        .build(),
+                    null)),
+            Arrays.asList(
+                new Dataset(
+                    "namespace",
+                    "dataset_output",
+                    null,
+                    null,
+                    LineageEvent.OutputDatasetFacets.builder()
+                        .additional(
+                            ImmutableMap.of(
+                                "outputFacet1", "{some-facet1}",
+                                "outputFacet2", "{some-facet2}"))
+                        .build())));
+
+    Run run = runDao.findRunByUuid(lineageRow.getRun().getUuid()).get();
+
+    assertThat(run.getInputDatasetVersions()).hasSize(1);
+    assertThat(run.getInputDatasetVersions().get(0).getDatasetVersionId())
+        .isEqualTo(
+            new DatasetVersionId(
+                NamespaceName.of("namespace"),
+                DatasetName.of("dataset_input"),
+                lineageRow.getInputs().get().get(0).getDatasetVersionRow().getVersion()));
+    assertThat(run.getInputDatasetVersions().get(0).getFacets())
+        .containsAllEntriesOf(
+            ImmutableMap.of(
+                "inputFacet1", "{some-facet1}",
+                "inputFacet2", "{some-facet2}"));
+
+    assertThat(run.getOutputDatasetVersions()).hasSize(1);
+    assertThat(run.getOutputDatasetVersions().get(0).getDatasetVersionId())
+        .isEqualTo(
+            new DatasetVersionId(
+                NamespaceName.of("namespace"),
+                DatasetName.of("dataset_output"),
+                lineageRow.getOutputs().get().get(0).getDatasetVersionRow().getVersion()));
+    assertThat(run.getOutputDatasetVersions().get(0).getFacets())
+        .containsAllEntriesOf(
+            ImmutableMap.of(
+                "outputFacet1", "{some-facet1}",
+                "outputFacet2", "{some-facet2}"));
   }
 
   private Dataset getInputDataset() {
@@ -523,7 +696,7 @@ class OpenLineageDaoTest {
 
   private Dataset getOutputDatasetWithColumnLineage() {
     return new Dataset(
-        LineageTestUtils.NAMESPACE,
+        NAMESPACE,
         DATASET_NAME,
         LineageEvent.DatasetFacets.builder()
             .schema(

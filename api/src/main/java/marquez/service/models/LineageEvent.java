@@ -15,6 +15,7 @@ import java.time.ZonedDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import javax.annotation.Nullable;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
@@ -24,6 +25,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
+import marquez.common.models.JobType;
 
 /**
  * Requires jackson serialization features: mapper.registerModule(new JavaTimeModule());
@@ -38,7 +40,7 @@ import lombok.ToString;
 @Getter
 @Valid
 @ToString
-public class LineageEvent extends BaseJsonModel {
+public class LineageEvent extends BaseEvent {
 
   private String eventType;
 
@@ -48,6 +50,21 @@ public class LineageEvent extends BaseJsonModel {
   @Valid private List<Dataset> inputs;
   @Valid private List<Dataset> outputs;
   @Valid @NotNull private String producer;
+  @Valid private URI schemaURL;
+
+  @JsonIgnore
+  public boolean isTerminalEvent() {
+    return (eventType != null)
+        && (eventType.equalsIgnoreCase("COMPLETE") || eventType.equalsIgnoreCase("FAIL"));
+  }
+
+  @JsonIgnore
+  public boolean isTerminalEventForStreamingJobWithNoDatasets() {
+    return isTerminalEvent()
+        && (job != null && job.isStreamingJob())
+        && (outputs == null || outputs.isEmpty())
+        && (inputs == null || inputs.isEmpty());
+  }
 
   @AllArgsConstructor
   @NoArgsConstructor
@@ -205,6 +222,25 @@ public class LineageEvent extends BaseJsonModel {
     @NotNull private String namespace;
     @NotNull private String name;
     @Valid private JobFacet facets;
+
+    /**
+     * Verifies if a job is a streaming job.
+     *
+     * @return
+     */
+    @JsonIgnore
+    public boolean isStreamingJob() {
+      return Optional.ofNullable(this.facets)
+          .map(JobFacet::getJobType)
+          .map(JobTypeJobFacet::getProcessingType)
+          .filter(type -> type.equalsIgnoreCase("STREAMING"))
+          .isPresent();
+    }
+
+    @JsonIgnore
+    public JobType type() {
+      return isStreamingJob() ? JobType.STREAM : JobType.BATCH;
+    }
   }
 
   @Builder
@@ -213,12 +249,13 @@ public class LineageEvent extends BaseJsonModel {
   @Setter
   @Valid
   @ToString
-  @JsonPropertyOrder({"documentation", "sourceCodeLocation", "sql", "description"})
+  @JsonPropertyOrder({"documentation", "sourceCodeLocation", "sql", "description", "jobType"})
   public static class JobFacet {
 
     @Valid private DocumentationJobFacet documentation;
     @Valid private SourceCodeLocationJobFacet sourceCodeLocation;
     @Valid private SQLJobFacet sql;
+    @Valid private JobTypeJobFacet jobType;
     @Builder.Default @JsonIgnore private Map<String, Object> additional = new LinkedHashMap<>();
 
     @JsonAnySetter
@@ -237,6 +274,10 @@ public class LineageEvent extends BaseJsonModel {
 
     public SourceCodeLocationJobFacet getSourceCodeLocation() {
       return sourceCodeLocation;
+    }
+
+    public JobTypeJobFacet getJobType() {
+      return jobType;
     }
 
     public SQLJobFacet getSql() {
@@ -296,6 +337,31 @@ public class LineageEvent extends BaseJsonModel {
     }
   }
 
+  @NoArgsConstructor
+  @Getter
+  @Setter
+  @Valid
+  @ToString
+  public static class JobTypeJobFacet extends BaseFacet {
+
+    @NotNull private String processingType;
+    @NotNull private String integration;
+    @NotNull private String jobType;
+
+    @Builder
+    public JobTypeJobFacet(
+        @NotNull URI _producer,
+        @NotNull URI _schemaURL,
+        @NotNull String processingType,
+        @NotNull String integration,
+        @NotNull String jobType) {
+      super(_producer, _schemaURL);
+      this.processingType = processingType;
+      this.integration = integration;
+      this.jobType = jobType;
+    }
+  }
+
   @Builder
   @AllArgsConstructor
   @NoArgsConstructor
@@ -309,6 +375,22 @@ public class LineageEvent extends BaseJsonModel {
     @NotNull private String namespace;
     @NotNull private String name;
     @Valid private DatasetFacets facets;
+    @Valid private InputDatasetFacets inputFacets;
+    @Valid private OutputDatasetFacets outputFacets;
+
+    /**
+     * Constructor with three args added manually to support dozens of existing usages created
+     * before adding inputFacets and outputFacets, as Lombok does not provide SomeArgsConstructor.
+     *
+     * @param namespace
+     * @param name
+     * @param facets
+     */
+    public Dataset(String namespace, String name, DatasetFacets facets) {
+      this.namespace = namespace;
+      this.name = name;
+      this.facets = facets;
+    }
   }
 
   @Builder
@@ -560,5 +642,49 @@ public class LineageEvent extends BaseJsonModel {
     @NotNull private String namespace;
     @NotNull private String name;
     @NotNull private String field;
+  }
+
+  @Builder
+  @AllArgsConstructor
+  @NoArgsConstructor
+  @Setter
+  @Getter
+  @Valid
+  @ToString
+  public static class InputDatasetFacets {
+
+    @Builder.Default @JsonIgnore private Map<String, Object> additional = new LinkedHashMap<>();
+
+    @JsonAnySetter
+    public void setInputFacet(String key, Object value) {
+      additional.put(key, value);
+    }
+
+    @JsonAnyGetter
+    public Map<String, Object> getAdditionalFacets() {
+      return additional;
+    }
+  }
+
+  @Builder
+  @AllArgsConstructor
+  @NoArgsConstructor
+  @Setter
+  @Getter
+  @Valid
+  @ToString
+  public static class OutputDatasetFacets {
+
+    @Builder.Default @JsonIgnore private Map<String, Object> additional = new LinkedHashMap<>();
+
+    @JsonAnySetter
+    public void setOutputFacet(String key, Object value) {
+      additional.put(key, value);
+    }
+
+    @JsonAnyGetter
+    public Map<String, Object> getAdditionalFacets() {
+      return additional;
+    }
   }
 }

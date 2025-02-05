@@ -15,7 +15,9 @@ import static marquez.client.MarquezPathV1.datasetTagPath;
 import static marquez.client.MarquezPathV1.datasetVersionPath;
 import static marquez.client.MarquezPathV1.fieldTagPath;
 import static marquez.client.MarquezPathV1.jobPath;
+import static marquez.client.MarquezPathV1.jobTagPath;
 import static marquez.client.MarquezPathV1.jobVersionPath;
+import static marquez.client.MarquezPathV1.lineagePath;
 import static marquez.client.MarquezPathV1.listDatasetVersionsPath;
 import static marquez.client.MarquezPathV1.listDatasetsPath;
 import static marquez.client.MarquezPathV1.listJobVersionsPath;
@@ -182,6 +184,10 @@ class MarquezUrl {
     return from(datasetTagPath(namespaceName, datasetName, tagName));
   }
 
+  URL toJobTagUrl(@NonNull String namespaceName, @NonNull String jobName, @NonNull String tagName) {
+    return from(jobTagPath(namespaceName, jobName, tagName));
+  }
+
   URL toFieldTagURL(String namespaceName, String datasetName, String fieldName, String tagName) {
     return from(fieldTagPath(namespaceName, datasetName, fieldName, tagName));
   }
@@ -206,6 +212,13 @@ class MarquezUrl {
     }
     queryParams.put("limit", limit);
     return from(searchPath(), queryParams.build());
+  }
+
+  URL toLineageUrl(NodeId nodeId, int depth) {
+    final ImmutableMap.Builder queryParams = new ImmutableMap.Builder();
+    queryParams.put("nodeId", nodeId.getValue());
+    queryParams.put("depth", String.valueOf(depth));
+    return from(lineagePath(), queryParams.build());
   }
 
   URL toColumnLineageUrl(NodeId nodeId, int depth, boolean withDownstream) {

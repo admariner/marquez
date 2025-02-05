@@ -40,15 +40,18 @@ public final class JobRowMapper implements RowMapper<JobRow> {
         stringOrThrow(results, Columns.TYPE),
         timestampOrThrow(results, Columns.CREATED_AT),
         timestampOrThrow(results, Columns.UPDATED_AT),
+        uuidOrNull(results, Columns.NAMESPACE_UUID),
         stringOrThrow(results, Columns.NAMESPACE_NAME),
         stringOrThrow(results, Columns.NAME),
         stringOrThrow(results, Columns.SIMPLE_NAME),
         stringOrNull(results, Columns.PARENT_JOB_NAME),
+        uuidOrNull(results, Columns.PARENT_JOB_UUID),
         stringOrNull(results, Columns.DESCRIPTION),
         uuidOrNull(results, Columns.CURRENT_VERSION_UUID),
         stringOrNull(results, "current_location"),
         getDatasetFromJsonOrNull(results, "current_inputs"),
-        uuidOrNull(results, Columns.SYMLINK_TARGET_UUID));
+        uuidOrNull(results, Columns.SYMLINK_TARGET_UUID),
+        uuidOrNull(results, Columns.CURRENT_RUN_UUID));
   }
 
   Set<DatasetId> getDatasetFromJsonOrNull(@NonNull ResultSet results, String column)

@@ -6,9 +6,7 @@
 package marquez.client;
 
 import com.google.common.annotations.VisibleForTesting;
-import java.io.UnsupportedEncodingException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
+import com.google.common.net.UrlEscapers;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.stream.Collectors;
@@ -57,11 +55,7 @@ class MarquezPathV1 {
   }
 
   static String encode(String input) {
-    try {
-      return URLEncoder.encode(input, StandardCharsets.UTF_8.toString());
-    } catch (UnsupportedEncodingException e) {
-      throw new MarquezClientException(e);
-    }
+    return UrlEscapers.urlPathSegmentEscaper().escape(input);
   }
 
   static String listNamespacesPath() {
@@ -159,6 +153,11 @@ class MarquezPathV1 {
     return path("/namespaces/%s/datasets/%s/tags/%s", namespaceName, datasetName, tagName);
   }
 
+  static String jobTagPath(
+      @NonNull String namespaceName, @NonNull String jobName, @NonNull String tagName) {
+    return path("/namespaces/%s/jobs/%s/tags/%s", namespaceName, jobName, tagName);
+  }
+
   static String fieldTagPath(
       String namespaceName, String datasetName, String fieldName, String tagName) {
     return path(
@@ -176,6 +175,10 @@ class MarquezPathV1 {
 
   static String searchPath() {
     return path("/search");
+  }
+
+  static String lineagePath() {
+    return path("/lineage/");
   }
 
   static String columnLineagePath() {
